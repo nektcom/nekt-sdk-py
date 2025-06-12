@@ -1,4 +1,3 @@
-from functools import cached_property
 from typing import Dict
 
 import requests
@@ -12,12 +11,12 @@ from nekt.sdk.service.auth import get_cloud_credentials
 class TransformationClient:
     data_access_token: str
 
-    def __init__(self, data_access_token: str, api_url: str = "https://api.nekt.ai"):
+    def __init__(self, data_access_token: str, api_url: str = "https://api.nekt.ai", spark: SparkSession = None):
         self.data_access_token = data_access_token
         self.api_url = api_url
+        self._spark = spark or self._create_spark_session()
 
-    @cached_property
-    def spark(self) -> SparkSession:
+    def _create_spark_session(self) -> SparkSession:
         credentials = get_cloud_credentials(self.data_access_token)
 
         conf = (
@@ -35,7 +34,11 @@ class TransformationClient:
             .setMaster("local[*]")
         )
 
-        return SparkSession.builder.config(conf=conf).getOrCreate()
+        self._spark = SparkSession.builder.config(conf=conf).getOrCreate()
+
+    @property
+    def spark(self) -> SparkSession:
+        return self._spark
 
     def _get_table_details(self, layer_identifier: str, table_identifier: str) -> Dict[str, str]:
         url: str = f"{self.api_url}/api/v1/i/layers/{layer_identifier}/tables/{table_identifier}?use_s3a=true"
