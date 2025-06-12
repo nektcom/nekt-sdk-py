@@ -34,7 +34,7 @@ class TransformationClient:
             .setMaster("local[*]")
         )
 
-        self._spark = SparkSession.builder.config(conf=conf).getOrCreate()
+        return SparkSession.builder.config(conf=conf).getOrCreate()
 
     @property
     def spark(self) -> SparkSession:
