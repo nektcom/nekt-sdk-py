@@ -47,7 +47,14 @@ class TransformationClient:
         response.raise_for_status()
         return response.json()
 
-    def load_table(self, *, layer_name: str, table_name: str) -> DeltaTable:
+    def load_table(self, *, layer_name: str, table_name: str) -> DataFrame:
+        """
+        Load a table into the transformation.
+        """
+        delta_table = self.load_delta_table(layer_name=layer_name, table_name=table_name)
+        return delta_table.toDF()
+
+    def load_delta_table(self, *, layer_name: str, table_name: str) -> DeltaTable:
         """
         Load a table into the transformation.
         """
