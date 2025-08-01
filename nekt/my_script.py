@@ -1,0 +1,12 @@
+from pyspark.sql import DataFrame
+
+import nekt
+
+nekt.data_access_token = "AdGnRRTj5ehKXCR3EpMKREKW4AZIwnwZHss6dROHGnwEh0eQuG9gRNMgdwm7FvBOz5FZE2MdnoaSXZqd2RJGmcBvbyAw0SZ5EMr3xKGUYwcAWxy0AqzVGIYzqCmx6ie31kixt7fYPrYY7QwQK0ME28U2VGKLLvqFEyvv0pWLwtMkKVbG2YRVOm81hk0WgLecX0BbaNPongdaLhsAZ6rAm8ucz6dM3rV8cFxeiRWXxzhPs6fYUPWzbLWXx9TztHih"
+
+
+vistacrm_brognoli_clientes_df: DataFrame = nekt.load_table(
+    layer_name="Trusted", table_name="vistacrm_brognoli_clientes"
+)
+
+vistacrm_brognoli_clientes_df.show(10)
