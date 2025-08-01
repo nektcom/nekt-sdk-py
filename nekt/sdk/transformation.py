@@ -3,7 +3,7 @@ from typing import Dict
 import requests
 from delta.tables import DeltaTable
 from pyspark.conf import SparkConf
-from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame, SparkSession
 
 from nekt.sdk.service.auth import get_cloud_credentials
 
@@ -60,7 +60,7 @@ class TransformationClient:
         s3_path = table_details.get("s3_path")
         return DeltaTable.forPath(self.spark, s3_path)
 
-    def save_table(self, layer_name: str, table_name: str) -> bool:
+    def save_table(self, *, df: DataFrame, layer_name: str, table_name: str) -> bool:
         """
         Save a table into the layer.
         """
