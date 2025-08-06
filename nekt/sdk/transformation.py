@@ -1,0 +1,74 @@
+from typing import Dict
+
+import requests
+from delta.tables import DeltaTable
+from pyspark.conf import SparkConf
+from pyspark.sql import DataFrame, SparkSession
+
+from nekt.sdk.service.auth import get_cloud_credentials
+
+
+class TransformationClient:
+    data_access_token: str
+
+    def __init__(self, data_access_token: str, api_url: str = "https://api.nekt.ai", spark: SparkSession = None):
+        self.data_access_token = data_access_token
+        self.api_url = api_url
+        self._spark = spark or self._create_spark_session()
+
+    def _create_spark_session(self) -> SparkSession:
+        credentials = get_cloud_credentials(self.data_access_token)
+
+        conf = (
+            SparkConf()
+            .setAppName("Nekt-Transformation")  # replace with your desired name
+            .set("spark.jars.packages", "io.delta:delta-spark_2.12:3.2.1,org.apache.hadoop:hadoop-aws:3.3.4")
+            .set("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+            .set("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+            .set("spark.hadoop.fs.s3a.access.key", credentials["aws_access_key_id"])
+            .set("spark.hadoop.fs.s3a.secret.key", credentials["aws_secret_access_key"])
+            .set("spark.hadoop.fs.s3a.session.token", credentials["aws_session_token"])
+            # default is 200 partitions which is too many for local
+            .set("spark.sql.shuffle.partitions", "4")
+            # replace the * with your desired number of cores. * for use all.
+            .setMaster("local[*]")
+        )
+
+        return SparkSession.builder.config(conf=conf).getOrCreate()
+
+    @property
+    def spark(self) -> SparkSession:
+        return self._spark
+
+    def _get_table_details(self, layer_identifier: str, table_identifier: str) -> Dict[str, str]:
+        url: str = f"{self.api_url}/api/v1/i/layers/{layer_identifier}/tables/{table_identifier}?use_s3a=true"
+        headers = {"X-Jupyter-Token": self.data_access_token}
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+
+    def load_table(self, *, layer_name: str, table_name: str) -> DataFrame:
+        """
+        Load a table into the transformation.
+        """
+        delta_table = self.load_delta_table(layer_name=layer_name, table_name=table_name)
+        return delta_table.toDF()
+
+    def load_delta_table(self, *, layer_name: str, table_name: str) -> DeltaTable:
+        """
+        Load a table into the transformation.
+        """
+        if not layer_name:
+            raise Exception("Layer name is required")
+        if not table_name:
+            raise Exception("Table name is required")
+
+        table_details = self._get_table_details(layer_name, table_name)
+        s3_path = table_details.get("s3_path")
+        return DeltaTable.forPath(self.spark, s3_path)
+
+    def save_table(self, *, df: DataFrame, layer_name: str, table_name: str) -> bool:
+        """
+        Save a table into the layer.
+        """
+        print("Table can only be saved in Nekt Production environment")
