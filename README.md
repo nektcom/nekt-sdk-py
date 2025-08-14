@@ -201,8 +201,8 @@ daily_sales = (
 )
 
 # Save results
-nekt.save_table(enriched_orders, "Trusted", "enriched_orders")
-nekt.save_table(daily_sales, "Service", "daily_sales_summary")
+nekt.save_table(df=enriched_orders, layer_name="Trusted", table_name="enriched_orders")
+nekt.save_table(df=daily_sales, layer_name="Service", table_name="daily_sales_summary")
 ```
 
 
