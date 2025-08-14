@@ -1,5 +1,5 @@
 import sys
-from typing import Optional
+from typing import Dict, List, Optional
 
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
@@ -60,6 +60,20 @@ class NektModule:
         if self._nekt_api_url != url:
             object.__setattr__(self, "_nekt_api_url", url)
             self._reset_client()
+
+    def load_volume(self, *, layer_name: str, volume_name: str) -> List[Dict[str, str]]:
+        """
+        Load a volume into the transformation.
+
+        Args:
+            layer_name: The name of the layer
+            volume_name: The name of the volume
+
+        Returns:
+            List[Dict[str, str]]: The list of file paths in the volume
+        """
+        client = self._get_client()
+        return client.load_volume(layer_name=layer_name, volume_name=volume_name)
 
     def load_table(self, *, layer_name: str, table_name: str) -> DataFrame:
         """

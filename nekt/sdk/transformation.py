@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import requests
 from delta.tables import DeltaTable
@@ -46,6 +46,22 @@ class TransformationClient:
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         return response.json()
+
+    def load_volume(self, layer_name: str, volume_name: str) -> List[Dict[str, str]]:
+        """
+        Load a volume into the transformation.
+        """
+        if not layer_name:
+            raise Exception("Layer name is required")
+        if not volume_name:
+            raise Exception("Volume name is required")
+
+        url: str = f"{self.api_url}/api/v1/i/layers/{layer_name}/volumes/{volume_name}/get-file-paths/"
+        headers = {"X-Jupyter-Token": self.data_access_token}
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        return data
 
     def load_table(self, *, layer_name: str, table_name: str) -> DataFrame:
         """
