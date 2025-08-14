@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 
 import requests
 from delta.tables import DeltaTable
@@ -67,8 +67,13 @@ class TransformationClient:
         s3_path = table_details.get("s3_path")
         return DeltaTable.forPath(self.spark, s3_path)
 
-    def save_table(self, *, df: DataFrame, layer_name: str, table_name: str) -> bool:
+    def save_table(self, *, df: DataFrame, layer_name: str, table_name: str, folder_name: Optional[str] = None) -> bool:
         """
         Save a table into the layer.
         """
-        print("Table can only be saved in Nekt Production environment")
+        print(
+            f"WARNING: Table saving is not available in the local development environment. "
+            f'To save dataframe as table "{table_name}" in folder "{folder_name}" '
+            f'of layer "{layer_name}", use the Nekt Production environment.'
+        )
+        return False

@@ -89,7 +89,7 @@ class NektModule:
         client = self._get_client()
         return client.load_delta_table(layer_name=layer_name, table_name=table_name)
 
-    def save_table(self, *, df: DataFrame, layer_name: str, table_name: str) -> bool:
+    def save_table(self, *, df: DataFrame, layer_name: str, table_name: str, folder_name: Optional[str] = None) -> bool:
         """
         Save a table into the layer.
 
@@ -97,12 +97,13 @@ class NektModule:
             df: The DataFrame to save
             layer_name: The name of the layer
             table_name: The name of the table
+            folder_name: The name of the folder to save the table in. If not provided, the table will be saved in the root of the layer.
 
         Returns:
             bool: Success status
         """
         client = self._get_client()
-        return client.save_table(df=df, layer_name=layer_name, table_name=table_name)
+        return client.save_table(df=df, layer_name=layer_name, table_name=table_name, folder_name=folder_name)
 
     def get_spark_session(self) -> SparkSession:
         """
