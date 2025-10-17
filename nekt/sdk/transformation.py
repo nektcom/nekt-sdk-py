@@ -6,7 +6,7 @@ from pyspark.conf import SparkConf
 from pyspark.sql import DataFrame, SparkSession
 
 from nekt.sdk.service.auth import get_cloud_credentials
-from nekt.sdk.service.secrets import get_secret
+from nekt.sdk.service.secret import load_secret
 
 
 class TransformationClient:
@@ -102,4 +102,4 @@ class TransformationClient:
         if not key:
             raise Exception("Secret key is required")
 
-        return get_secret(self.data_access_token, key, self.api_url)
+        return load_secret(self.data_access_token, key, self.api_url)
