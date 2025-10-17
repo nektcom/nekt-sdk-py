@@ -119,6 +119,19 @@ class NektModule:
         client = self._get_client()
         return client.save_table(df=df, layer_name=layer_name, table_name=table_name, folder_name=folder_name)
 
+    def load_secret(self, *, key: str) -> str:
+        """
+        Load a secret value by key from the organization secrets.
+
+        Args:
+            key: The secret key to retrieve
+
+        Returns:
+            str: The secret value
+        """
+        client = self._get_client()
+        return client.load_secret(key=key)
+
     def get_spark_session(self) -> SparkSession:
         """
         Get the shared Spark session instance.
@@ -165,5 +178,6 @@ __all__ = [
     "load_table",
     "load_delta_table",
     "save_table",
+    "load_secret",
     "get_spark_session",
 ]

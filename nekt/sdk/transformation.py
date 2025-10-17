@@ -6,6 +6,7 @@ from pyspark.conf import SparkConf
 from pyspark.sql import DataFrame, SparkSession
 
 from nekt.sdk.service.auth import get_cloud_credentials
+from nekt.sdk.service.secrets import get_secret
 
 
 class TransformationClient:
@@ -93,3 +94,12 @@ class TransformationClient:
             f'of layer "{layer_name}", use the Nekt Production environment.'
         )
         return False
+
+    def load_secret(self, *, key: str) -> str:
+        """
+        Load a secret value by key from the organization secrets.
+        """
+        if not key:
+            raise Exception("Secret key is required")
+
+        return get_secret(self.data_access_token, key, self.api_url)
