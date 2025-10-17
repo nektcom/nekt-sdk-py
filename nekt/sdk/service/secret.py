@@ -6,7 +6,7 @@ import requests
 from requests.exceptions import HTTPError
 
 
-def get_secret(data_access_token: str, key: str, api_url: str = "https://api.nekt.ai") -> SecretStr:
+def load_secret(data_access_token: str, key: str, api_url: str = "https://api.nekt.ai") -> str:
     """
     Get a secret value by key from the Nekt API.
     """
