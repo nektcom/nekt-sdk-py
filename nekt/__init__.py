@@ -103,7 +103,17 @@ class NektModule:
         client = self._get_client()
         return client.load_delta_table(layer_name=layer_name, table_name=table_name)
 
-    def save_table(self, *, df: DataFrame, layer_name: str, table_name: str, folder_name: Optional[str] = None) -> bool:
+    def save_table(
+        self,
+        *,
+        df: DataFrame,
+        layer_name: str,
+        table_name: str,
+        mode: str = "overwrite",
+        merge_keys: Optional[List[str]] = None,
+        schema_evolution: str = "merge",
+        folder_name: Optional[str] = None,
+    ) -> bool:
         """
         Save a table into the layer.
 
@@ -117,7 +127,15 @@ class NektModule:
             bool: Success status
         """
         client = self._get_client()
-        return client.save_table(df=df, layer_name=layer_name, table_name=table_name, folder_name=folder_name)
+        return client.save_table(
+            df=df,
+            layer_name=layer_name,
+            table_name=table_name,
+            folder_name=folder_name,
+            mode=mode,
+            merge_keys=merge_keys,
+            schema_evolution=schema_evolution,
+        )
 
     def load_secret(self, *, key: str) -> str:
         """

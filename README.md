@@ -111,25 +111,56 @@ file_paths = nekt.load_volume(layer_name="Raw", volume_name="documents")
 
 ### Data Saving
 
-#### `nekt.save_table(df: DataFrame, layer_name: str, table_name: str, folder_name: Optional[str] = None) -> bool`
-Save a DataFrame to a specified layer and table.
+#### `nekt.save_table(df: DataFrame, layer_name: str, table_name: str, mode: str = "overwrite", merge_keys: Optional[List[str]] = None, schema_evolution: str = "merge", folder_name: Optional[str] = None) -> bool`
+Save a Spark DataFrame as a table into the layer.
 
 **Parameters:**
-- `df`: The PySpark DataFrame to save
-- `layer_name`: The target data layer
-- `table_name`: The target table name
-- `folder_name`: Optional folder within the layer
+- `df`: The Spark DataFrame to save
+- `layer_name`: Name of the target layer
+- `table_name`: Name of the target table
+- `mode`: Write mode - "overwrite" (default), "append", or "merge"
+- `merge_keys`: List of column names to use as keys for merge mode (required if mode="merge")
+- `schema_evolution`: How to handle schema changes - "merge" (default), "strict", or "overwrite"
+  - `"merge"`: Allow adding new fields and compatible type changes (recommended for sources)
+  - `"strict"`: Disallow any schema changes (raises error if schema differs)
+  - `"overwrite"`: Replace schema completely (useful for full syncs)
+- `folder_name`: Optional folder name for organizing tables
 
-**Returns:** Success status (boolean)
+**Returns:** True if save was successful
+
+**Raises:**
+- `ValueError`: If mode is "merge" but merge_keys is not provided
+- `ValueError`: If mode is not one of "overwrite", "append", "merge"
+- `SchemaEvolutionError`: If schema changes are incompatible
 
 **Note:** Table saving is only available in the Nekt Production environment. In local development, this function will display a warning and return `False`.
 
 ```python
+# Simple overwrite example
 success = nekt.save_table(
     df=processed_data,
     layer_name="Service",
     table_name="analytics_results",
     folder_name="monthly_reports"
+)
+
+# Merge/upsert example with schema evolution
+success = nekt.save_table(
+    df=incremental_data,
+    layer_name="Trusted",
+    table_name="customer_data",
+    mode="merge",
+    merge_keys=["customer_id"],
+    schema_evolution="merge"
+)
+
+# Append mode example
+success = nekt.save_table(
+    df=new_records,
+    layer_name="Trusted",
+    table_name="event_log",
+    mode="append",
+    schema_evolution="strict"
 )
 ```
 

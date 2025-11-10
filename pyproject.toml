@@ -1,6 +1,6 @@
 [project]
 name = "nekt-sdk"
-version = "0.3.1"
+version = "0.3.3"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -8,4 +8,16 @@ dependencies = [
     "delta-spark==3.3.0",
     "pyspark==3.5.5",
     "requests>=2.32.3",
+]
+
+[tool.ruff]
+line-length = 160
+
+[tool.ruff.lint]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = [
+    "D104",  # Missing docstring in public package
+    "F401",  # Imported but unused; consider removing, adding to `__all__`, or using a redundant alias
 ]
