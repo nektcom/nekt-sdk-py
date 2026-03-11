@@ -1,17 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "nekt-sdk"
-version = "0.3.3"
-description = "Add your description here"
+version = "0.4.0"
+description = "Nekt SDK for data lake operations"
 readme = "README.md"
-requires-python = ">=3.9"
-dependencies = [
-    "delta-spark==3.3.0",
-    "pyspark==3.5.5",
-    "requests>=2.32.3",
-]
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["nekt"]
 
 [tool.ruff]
 line-length = 160
+target-version = "py311"
 
 [tool.ruff.lint]
 ignore = []
