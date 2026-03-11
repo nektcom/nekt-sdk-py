@@ -6,4 +6,4 @@ def test_import_nekt():
 def test_version_string():
     import nekt
     assert isinstance(nekt.__version__, str)
-    assert nekt.__version__ == "0.4.0"
+    assert nekt.__version__ == "0.7.0"
