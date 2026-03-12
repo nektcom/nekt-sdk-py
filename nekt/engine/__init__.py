@@ -8,4 +8,10 @@ try:
 except ImportError:
     PythonEngine = None  # type: ignore[assignment,misc]
 
-__all__ = ["Engine", "PythonEngine", "StubResponse"]
+# SparkEngine is optional (requires pyspark)
+try:
+    from nekt.engine.spark import SparkEngine
+except ImportError:
+    SparkEngine = None  # type: ignore[assignment,misc]
+
+__all__ = ["Engine", "PythonEngine", "SparkEngine", "StubResponse"]
