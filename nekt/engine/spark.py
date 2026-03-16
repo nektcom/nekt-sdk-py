@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from delta.tables import DeltaTable as _DeltaTable
 
     from nekt.api import NektAPI
+    from nekt.provider.base import DataProvider
 
 logger = logging.getLogger("nekt.engine.spark")
 
@@ -30,10 +31,14 @@ class SparkEngine(Engine):
     are stubs inherited from :class:`Engine` -- install ``nekt-sdk-internal``
     for full write support.
 
-    This engine uses:
-    - PySpark for Spark DataFrame operations
-    - Delta Spark for Delta Lake operations (AWS)
-    - BigQuery Spark connector for BigQuery operations (GCP)
+    This engine delegates storage loading to a :class:`DataProvider`
+    instance selected based on the cloud provider:
+
+    - **AWS** -- :class:`SparkDeltaProvider` (delta-spark)
+    - **GCP** -- :class:`SparkBigQueryProvider` (spark-bigquery connector)
+
+    The provider is created lazily (on first use) because it requires
+    the SparkSession, which is itself lazy-initialized.
     """
 
     def __init__(
@@ -55,10 +60,44 @@ class SparkEngine(Engine):
             environment: Execution environment.
         """
         self._api = api
-        self._provider = provider
+        self._cloud_provider = provider
+        self._provider = provider  # backward compat for internal SDK subclass
         self._credentials = credentials
         self._environment = environment
         self._spark: pyspark.sql.SparkSession | None = None
+        self._data_provider: DataProvider | None = None
+
+    # ------------------------------------------------------------------
+    # Provider delegation
+    # ------------------------------------------------------------------
+
+    def _get_data_provider(self) -> DataProvider:
+        """Get or create the data provider, lazily initialized.
+
+        The provider is created on first call because it requires the
+        SparkSession, which itself is lazy.
+
+        Returns:
+            The appropriate DataProvider for the configured cloud provider.
+
+        Raises:
+            EngineError: If the provider is not supported.
+        """
+        if self._data_provider is not None:
+            return self._data_provider
+
+        if self._cloud_provider == CloudProvider.AWS:
+            from nekt.provider.spark_delta import SparkDeltaProvider
+
+            self._data_provider = SparkDeltaProvider(spark=self.spark)
+        elif self._cloud_provider == CloudProvider.GCP:
+            from nekt.provider.spark_bigquery import SparkBigQueryProvider
+
+            self._data_provider = SparkBigQueryProvider(spark=self.spark, credentials=self._credentials)
+        else:
+            raise EngineError(f"Unsupported provider: {self._cloud_provider}")
+
+        return self._data_provider
 
     # ------------------------------------------------------------------
     # Properties
@@ -155,13 +194,19 @@ class SparkEngine(Engine):
         """
         logger.info("[%s/%s] Loading table as Spark DataFrame", layer_name, table_name)
 
-        if self._provider == CloudProvider.AWS:
+        if self._cloud_provider == CloudProvider.AWS:
             delta_table = self.load_delta_table(layer_name, table_name)
             return delta_table.toDF()
-        elif self._provider == CloudProvider.GCP:
-            return self._load_gcp_table(layer_name, table_name)
+        elif self._cloud_provider == CloudProvider.GCP:
+            table_details = self._api.get_table_details_raw(
+                layer_name, table_name, params={"include_layer_database_name": "true"}
+            )
+            table_reference = f"{table_details['layer_database_name']}.{table_name}"
+            logger.info("[%s/%s] Loading from BigQuery: %s", layer_name, table_name, table_reference)
+            provider = self._get_data_provider()
+            return provider.load(table_reference)
         else:
-            raise EngineError(f"Unsupported provider: {self._provider}")
+            raise EngineError(f"Unsupported provider: {self._cloud_provider}")
 
     def load_delta_table(self, layer_name: str, table_name: str) -> _DeltaTable:
         """Load a Delta table object.
@@ -180,16 +225,8 @@ class SparkEngine(Engine):
             EngineError: If the provider is not AWS or delta-spark is
                 not installed.
         """
-        if self._provider != CloudProvider.AWS:
+        if self._cloud_provider != CloudProvider.AWS:
             raise EngineError("Delta tables are only supported for AWS provider")
-
-        try:
-            from delta.tables import DeltaTable
-        except ImportError as e:
-            raise EngineError(
-                "delta-spark is required for loading Delta tables on AWS. "
-                "Install it with: pip install delta-spark"
-            ) from e
 
         # Get table path from raw API (need s3_path field)
         params: dict[str, str] = {}
@@ -203,37 +240,8 @@ class SparkEngine(Engine):
             raise EngineError(f"No S3 path returned for table {layer_name}/{table_name}")
 
         logger.info("[%s/%s] Loading Delta table from %s", layer_name, table_name, s3_path)
-        return DeltaTable.forPath(self.spark, s3_path)
-
-    def _load_gcp_table(self, layer_name: str, table_name: str) -> pyspark.sql.DataFrame:
-        """Load a table from GCP BigQuery via Spark connector.
-
-        Args:
-            layer_name: Name of the layer.
-            table_name: Name of the table.
-
-        Returns:
-            Spark DataFrame.
-        """
-        table_details = self._api.get_table_details_raw(
-            layer_name, table_name, params={"include_layer_database_name": "true"}
-        )
-        table_reference = f"{table_details['layer_database_name']}.{table_name}"
-
-        logger.info("[%s/%s] Loading from BigQuery: %s", layer_name, table_name, table_reference)
-
-        reader = (
-            self.spark.read.format("bigquery")
-            .option("table", table_reference)
-            .option("cacheExpirationTimeInMinutes", "0")
-        )
-
-        # Add GCP credentials if available (for LOCAL mode)
-        if self._credentials and self._credentials.gcp_access_token:
-            reader = reader.option("gcpAccessToken", self._credentials.gcp_access_token)
-            reader = reader.option("parentProject", self._credentials.gcp_project_id)
-
-        return reader.load()
+        provider = self._get_data_provider()
+        return provider.load(s3_path)
 
     def load_secret(self, key: str) -> str:
         """Load a secret value by key.

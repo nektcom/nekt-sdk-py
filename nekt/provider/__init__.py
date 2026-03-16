@@ -25,10 +25,23 @@ try:
 except ImportError:
     GCSParquetProvider = None  # type: ignore[assignment,misc]
 
+# Spark-based providers are optional (require pyspark, delta-spark / spark-bigquery)
+try:
+    from nekt.provider.spark_delta import SparkDeltaProvider
+except ImportError:
+    SparkDeltaProvider = None  # type: ignore[assignment,misc]
+
+try:
+    from nekt.provider.spark_bigquery import SparkBigQueryProvider
+except ImportError:
+    SparkBigQueryProvider = None  # type: ignore[assignment,misc]
+
 __all__ = [
     "DataProvider",
     "DeltaProvider",
     "BigQueryProvider",
     "S3ParquetProvider",
     "GCSParquetProvider",
+    "SparkDeltaProvider",
+    "SparkBigQueryProvider",
 ]
