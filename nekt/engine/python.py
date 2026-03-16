@@ -54,6 +54,7 @@ class PythonEngine(Engine):
         """
         self._api = api
         self._cloud_provider = provider
+        self._provider = provider  # backward compat for internal SDK subclass
         self._credentials = credentials
         self._environment = environment
         self._data_provider: DataProvider | None = self._create_data_provider(provider, credentials)
