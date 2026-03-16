@@ -11,6 +11,7 @@ import requests
 
 from nekt.engine.base import Engine
 from nekt.exceptions import EngineError, FileUploadError
+from nekt.provider.base import DataProvider
 from nekt.types import CloudCredentials, CloudProvider, Environment
 
 if TYPE_CHECKING:
@@ -29,11 +30,11 @@ class PythonEngine(Engine):
     are stubs inherited from :class:`Engine` -- install ``nekt-sdk-internal``
     for full write support.
 
-    This engine uses:
-    - PyArrow as the internal data format
-    - delta-rs (deltalake) for Delta Lake operations (AWS)
-    - google-cloud-bigquery for BigQuery operations (GCP)
-    - Pandas as the user-facing data format
+    This engine delegates storage loading to a :class:`DataProvider` instance
+    selected based on the cloud provider:
+
+    - **AWS** -- :class:`DeltaProvider` (delta-rs / deltalake)
+    - **GCP** -- :class:`BigQueryProvider` (google-cloud-bigquery)
     """
 
     def __init__(
@@ -52,9 +53,41 @@ class PythonEngine(Engine):
             environment: Execution environment.
         """
         self._api = api
-        self._provider = provider
+        self._cloud_provider = provider
         self._credentials = credentials
         self._environment = environment
+        self._data_provider: DataProvider | None = self._create_data_provider(provider, credentials)
+
+    @staticmethod
+    def _create_data_provider(
+        provider: CloudProvider,
+        credentials: CloudCredentials | None,
+    ) -> DataProvider | None:
+        """Create the appropriate DataProvider for the given cloud provider.
+
+        Returns ``None`` (with a warning) if the required optional dependency
+        is not installed.
+        """
+        if provider == CloudProvider.AWS:
+            try:
+                from nekt.provider.delta import DeltaProvider
+
+                return DeltaProvider(credentials=credentials)
+            except ImportError:
+                logger.warning("deltalake is not installed; DeltaProvider unavailable")
+                return None
+        elif provider == CloudProvider.GCP:
+            try:
+                from nekt.provider.bigquery import BigQueryProvider
+
+                project = credentials.gcp_project_id if credentials else None
+                return BigQueryProvider(credentials=credentials, project=project)
+            except ImportError:
+                logger.warning("google-cloud-bigquery is not installed; BigQueryProvider unavailable")
+                return None
+        else:
+            logger.warning("Unsupported cloud provider: %s", provider)
+            return None
 
     @property
     def name(self) -> str:
@@ -83,8 +116,13 @@ class PythonEngine(Engine):
         # Get table configuration from API
         table_config = self._get_table_config(layer_name, table_name)
 
-        # Load via inline provider
-        arrow_table = self._load_via_provider(table_config.path)
+        # Load via data provider
+        if self._data_provider is None:
+            raise EngineError(
+                "No storage provider available. Ensure the required library is installed "
+                "(deltalake for AWS, google-cloud-bigquery for GCP)."
+            )
+        arrow_table = self._data_provider.load(table_config.path)
 
         # Convert to pandas
         df = arrow_table.to_pandas()
@@ -260,101 +298,15 @@ class PythonEngine(Engine):
         Returns:
             TableConfig with table metadata.
         """
-        use_s3a = self._environment == Environment.LOCAL and self._provider == CloudProvider.AWS
+        use_s3a = self._environment == Environment.LOCAL and self._cloud_provider == CloudProvider.AWS
 
         return self._api.get_table_details(
             layer_name=layer_name,
             table_name=table_name,
-            provider=self._provider,
+            provider=self._cloud_provider,
             include_expectations=False,
-            include_delta_fields=self._provider == CloudProvider.AWS,
+            include_delta_fields=self._cloud_provider == CloudProvider.AWS,
             include_layer_database_name=True,
             use_s3a=use_s3a,
         )
 
-    def _load_via_provider(self, path: str) -> Any:
-        """Load data from storage using the appropriate provider.
-
-        For AWS: Uses deltalake (delta-rs) to read Delta tables.
-        For GCP: Uses google-cloud-bigquery to query BigQuery tables.
-
-        Args:
-            path: Storage path (S3/s3a path for AWS, BQ table ref for GCP).
-
-        Returns:
-            PyArrow Table.
-
-        Raises:
-            EngineError: If loading fails or required library is missing.
-        """
-        storage_options = self._credentials.to_storage_options() if self._credentials else {}
-
-        if self._provider == CloudProvider.AWS:
-            return self._load_delta(path, storage_options)
-        elif self._provider == CloudProvider.GCP:
-            return self._load_bigquery(path, storage_options)
-        else:
-            raise EngineError(f"Unsupported provider: {self._provider}")
-
-    def _load_delta(self, path: str, storage_options: dict[str, str]) -> Any:
-        """Load a Delta table via deltalake.
-
-        Args:
-            path: S3 or s3a path to the Delta table.
-            storage_options: AWS credentials as storage options.
-
-        Returns:
-            PyArrow Table.
-
-        Raises:
-            EngineError: If deltalake is not installed or loading fails.
-        """
-        try:
-            import deltalake
-        except ImportError as e:
-            raise EngineError(
-                "deltalake is required for loading Delta tables on AWS. "
-                "Install it with: pip install deltalake"
-            ) from e
-
-        try:
-            dt = deltalake.DeltaTable(path, storage_options=storage_options)
-            return dt.to_pyarrow_table()
-        except Exception as e:
-            raise EngineError(f"Failed to load Delta table at {path}: {e}") from e
-
-    def _load_bigquery(self, path: str, storage_options: dict[str, str]) -> Any:
-        """Load a BigQuery table.
-
-        Args:
-            path: Fully-qualified BigQuery table reference (dataset.table).
-            storage_options: GCP credentials as storage options.
-
-        Returns:
-            PyArrow Table.
-
-        Raises:
-            EngineError: If google-cloud-bigquery is not installed or loading fails.
-        """
-        try:
-            from google.cloud import bigquery
-        except ImportError as e:
-            raise EngineError(
-                "google-cloud-bigquery is required for loading BigQuery tables on GCP. "
-                "Install it with: pip install google-cloud-bigquery"
-            ) from e
-
-        try:
-            access_token = storage_options.get("GOOGLE_SERVICE_ACCOUNT_TOKEN")
-            if access_token:
-                from google.oauth2.credentials import Credentials
-
-                credentials = Credentials(token=access_token)
-                project_id = self._credentials.gcp_project_id if self._credentials else None
-                client = bigquery.Client(project=project_id, credentials=credentials)
-            else:
-                client = bigquery.Client()
-
-            return client.query(f"SELECT * FROM `{path}`").to_arrow()
-        except Exception as e:
-            raise EngineError(f"Failed to load BigQuery table at {path}: {e}") from e
