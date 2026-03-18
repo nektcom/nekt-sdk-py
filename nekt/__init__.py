@@ -5,195 +5,198 @@ Usage::
 
     import nekt
 
-    # Explicit initialization
-    nekt.init(token="your-token")
+    nekt.engine = "python"  # or "spark"
+    nekt.data_access_token = "your-token"
 
-    # Or auto-configure from NEKT_DATA_ACCESS_TOKEN env var
+    # API methods auto-initialize the engine on first call
     secret = nekt.get_secret("my-key")
     files = nekt.load_volume("layer", "volume")
 """
 
 from __future__ import annotations
 
-from typing import Any
+import importlib.util
+import os
+import sys
+import types as module_types
 
 __version__ = "0.7.0"
 
-from nekt.config import NektConfig  # noqa: F401
-from nekt.exceptions import NektError  # noqa: F401
-from nekt.types import (  # noqa: F401
-    CloudProvider,
-    Environment,
-    SaveMode,
-    SchemaEvolutionStrategy,
-    TokenType,
-)
 
-# Lazy singleton for flat API
-_api: Any = None  # typed as Any to avoid import at module level
+class NektModule(module_types.ModuleType):
+    """Module wrapper that provides attribute-style configuration for the Nekt SDK.
 
+    Replaces the nekt module in sys.modules so that users can do::
 
-def _get_api() -> Any:
-    """Get or create the lazy NektAPI singleton.
-
-    Auto-configures from environment variables on first call.
-
-    Returns:
-        NektAPI instance.
-
-    Raises:
-        ConfigurationError: If no data access token is configured.
+        import nekt
+        nekt.engine = "spark"
+        nekt.data_access_token = "token"
     """
-    global _api
-    if _api is None:
-        from nekt.api import NektAPI
-        from nekt.exceptions import ConfigurationError
 
-        config = NektConfig()
-        if config.data_access_token is None:
-            raise ConfigurationError(
-                "No data access token configured. "
-                "Set NEKT_DATA_ACCESS_TOKEN or call nekt.init(token=...)"
+    def __init__(self, name: str, doc: str | None = None):
+        super().__init__(name, doc)
+        # All internal state uses _nekt_ prefix and object.__setattr__ to avoid recursion
+        object.__setattr__(self, "_nekt_data_access_token", None)
+        object.__setattr__(self, "_nekt_api_url", None)
+        object.__setattr__(self, "_nekt_engine", None)
+        object.__setattr__(self, "_nekt_client", None)
+        object.__setattr__(self, "_nekt_locked", False)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _check_dependency(self, name: str, extras_group: str) -> None:
+        """Check if a module is importable; raise MissingDependencyError if not."""
+        if importlib.util.find_spec(name) is None:
+            from nekt.exceptions import MissingDependencyError
+
+            raise MissingDependencyError(name, extras_group)
+
+    def _ensure_not_locked(self, attr_name: str) -> None:
+        """Raise ConfigurationLockedError if config is locked after first API call."""
+        if self._nekt_locked:
+            from nekt.exceptions import ConfigurationLockedError
+
+            raise ConfigurationLockedError(
+                f"Cannot change '{attr_name}' after the first API call."
             )
 
-        _api = NektAPI(
-            config.data_access_token,
-            api_url=config.api_url,
-            environment=config.environment or Environment.LOCAL,
-            token_type=config.token_type,
+    def _resolve_config(self) -> None:
+        """Resolve config from env vars for any attribute still set to None.
+
+        Validates that engine and data_access_token are available before
+        engine initialization.
+        """
+        # Env var fallback for each config attribute
+        if self._nekt_data_access_token is None:
+            env_token = os.environ.get("NEKT_DATA_ACCESS_TOKEN")
+            if env_token is not None:
+                object.__setattr__(self, "_nekt_data_access_token", env_token)
+
+        if self._nekt_api_url is None:
+            env_url = os.environ.get("NEKT_API_URL")
+            if env_url is not None:
+                object.__setattr__(self, "_nekt_api_url", env_url)
+
+        if self._nekt_engine is None:
+            env_engine = os.environ.get("NEKT_ENGINE")
+            if env_engine is not None:
+                if env_engine not in ("spark", "python"):
+                    raise ValueError(
+                        f"Invalid NEKT_ENGINE value: '{env_engine}'. "
+                        "engine must be 'spark' or 'python'"
+                    )
+                # Validate dependency for env-var-sourced engine
+                if env_engine == "spark":
+                    self._check_dependency("pyspark", "spark")
+                object.__setattr__(self, "_nekt_engine", env_engine)
+
+        # After env var resolution, engine must be set
+        if self._nekt_engine is None:
+            from nekt.exceptions import EngineNotSetError
+
+            raise EngineNotSetError()
+
+        # Token must be available
+        if self._nekt_data_access_token is None:
+            from nekt.exceptions import ConfigurationError
+
+            raise ConfigurationError(
+                "No data access token configured. "
+                "Set nekt.data_access_token or NEKT_DATA_ACCESS_TOKEN."
+            )
+
+    def _get_engine(self):
+        """Lazy engine initialization (placeholder -- wired in plan 06-02)."""
+        if self._nekt_client is not None:
+            return self._nekt_client
+
+        self._resolve_config()
+        object.__setattr__(self, "_nekt_locked", True)
+
+        # Placeholder: actual engine construction added in plan 06-02
+        raise NotImplementedError(
+            "Engine initialization will be implemented in plan 06-02"
         )
-    return _api
+
+    # ------------------------------------------------------------------
+    # Attribute access
+    # ------------------------------------------------------------------
+
+    def __getattr__(self, name: str):
+        """Handle attribute reads for configuration and re-exports."""
+        if name == "data_access_token":
+            return self._nekt_data_access_token
+        if name == "api_url":
+            return self._nekt_api_url
+        if name == "engine":
+            return self._nekt_engine
+        if name == "_engine":
+            return self._nekt_client
+
+        # Re-exported types (lazy to avoid import cycles)
+        if name == "Environment":
+            from nekt.types import Environment
+
+            return Environment
+        if name == "TokenType":
+            from nekt.types import TokenType
+
+            return TokenType
+        if name == "CloudProvider":
+            from nekt.types import CloudProvider
+
+            return CloudProvider
+        if name == "SaveMode":
+            from nekt.types import SaveMode
+
+            return SaveMode
+        if name == "SchemaEvolutionStrategy":
+            from nekt.types import SchemaEvolutionStrategy
+
+            return SchemaEvolutionStrategy
+        if name == "NektConfig":
+            from nekt.config import NektConfig
+
+            return NektConfig
+        if name == "NektError":
+            from nekt.exceptions import NektError
+
+            return NektError
+
+        raise AttributeError(f"module 'nekt' has no attribute '{name}'")
+
+    def __setattr__(self, name: str, value):
+        """Handle attribute writes for configuration parameters."""
+        # Allow submodule assignment during import system operations
+        if isinstance(value, module_types.ModuleType):
+            object.__setattr__(self, name, value)
+            return
+
+        if name == "data_access_token":
+            self._ensure_not_locked(name)
+            object.__setattr__(self, "_nekt_data_access_token", value)
+        elif name == "api_url":
+            self._ensure_not_locked(name)
+            object.__setattr__(self, "_nekt_api_url", value)
+        elif name == "engine":
+            self._ensure_not_locked(name)
+            if value not in ("spark", "python"):
+                raise ValueError("engine must be 'spark' or 'python'")
+            if value == "spark":
+                self._check_dependency("pyspark", "spark")
+            object.__setattr__(self, "_nekt_engine", value)
+        else:
+            object.__setattr__(self, name, value)
 
 
-def init(
-    token: str | None = None,
-    api_url: str | None = None,
-    environment: str | None = None,
-) -> None:
-    """Initialize the Nekt SDK with explicit configuration.
-
-    Creates a new NektAPI instance and caches it as the module singleton.
-    Any previously created singleton is replaced.
-
-    Args:
-        token: Data access token. If None, reads from NEKT_DATA_ACCESS_TOKEN.
-        api_url: API base URL override.
-        environment: Environment override (e.g., 'LOCAL', 'AWS', 'GCP').
-    """
-    global _api
-    from nekt.api import NektAPI
-    from nekt.exceptions import ConfigurationError
-
-    config = NektConfig()
-
-    if token is not None:
-        config.set_data_access_token(token)
-    if api_url is not None:
-        config.set_api_url(api_url)
-    if environment is not None:
-        config.set_environment(Environment(environment))
-
-    config.lock()
-
-    if config.data_access_token is None:
-        raise ConfigurationError(
-            "No data access token configured. "
-            "Set NEKT_DATA_ACCESS_TOKEN or pass token= to nekt.init()"
-        )
-
-    _api = NektAPI(
-        config.data_access_token,
-        api_url=config.api_url,
-        environment=config.environment or Environment.LOCAL,
-        token_type=config.token_type,
-    )
-
-
-def _reset() -> None:
-    """Reset the module singleton (for testing)."""
-    global _api
-    _api = None
-
-
-def get_secret(key: str) -> str:
-    """Load a secret value by key.
-
-    Args:
-        key: The secret key to retrieve.
-
-    Returns:
-        The secret value.
-
-    Raises:
-        SecretNotFoundError: If the secret doesn't exist.
-        ConfigurationError: If the SDK is not configured.
-    """
-    return _get_api().load_secret(key)
-
-
-def load_volume(layer_name: str, volume_name: str) -> list[dict[str, str]]:
-    """Load volume file listings.
-
-    Args:
-        layer_name: Name of the layer.
-        volume_name: Name of the volume.
-
-    Returns:
-        List of file path dictionaries.
-
-    Raises:
-        VolumeNotFoundError: If the volume doesn't exist.
-        ConfigurationError: If the SDK is not configured.
-    """
-    return _get_api().load_volume(layer_name, volume_name)
-
-
-def create_volume(
-    layer_name: str,
-    volume_name: str,
-    description: str | None = None,
-) -> dict:
-    """Create a new volume in a layer.
-
-    Args:
-        layer_name: Name of the layer.
-        volume_name: Name of the volume to create.
-        description: Optional description.
-
-    Returns:
-        Dict containing volume metadata.
-
-    Raises:
-        APIError: If the layer is not found or creation fails.
-        ConfigurationError: If the SDK is not configured.
-    """
-    return _get_api().create_volume(layer_name, volume_name, description)
-
-
-def save_file(
-    layer_name: str,
-    volume_name: str,
-    file_path: str,
-    file_name: str | None = None,
-    description: str | None = None,
-) -> dict:
-    """Save a file to a volume using multipart upload.
-
-    Args:
-        layer_name: Name of the layer.
-        volume_name: Name of the volume.
-        file_path: Local path to the file to upload.
-        file_name: Optional name for the file in the volume.
-        description: Optional description for the file.
-
-    Returns:
-        Dict with file metadata: id, name, file_size, file_type, description.
-
-    Raises:
-        FileUploadError: If the upload fails.
-        ConfigurationError: If the SDK is not configured.
-    """
-    from nekt.services.volumes import VolumeService
-
-    service = VolumeService(_get_api())
-    return service.save_file(layer_name, volume_name, file_path, file_name, description)
+# ------------------------------------------------------------------
+# Module replacement
+# ------------------------------------------------------------------
+_module = NektModule(__name__, __doc__)
+_module.__file__ = __file__
+_module.__path__ = __path__
+_module.__package__ = __package__
+_module.__version__ = __version__
+sys.modules[__name__] = _module
