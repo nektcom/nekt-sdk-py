@@ -132,3 +132,34 @@ class FileDownloadError(NektError):
     """Raised when file download fails."""
 
     pass
+
+
+class MissingDependencyError(NektError):
+    """Raised when a required optional dependency is not installed."""
+
+    def __init__(
+        self,
+        dependency_name: str,
+        extras_group: str,
+        message: str | None = None,
+    ):
+        self.dependency_name = dependency_name
+        self.extras_group = extras_group
+        if message is None:
+            message = (
+                f"'{dependency_name}' is required but not installed. "
+                f"Install it with: pip install nekt-sdk[{extras_group}]"
+            )
+        super().__init__(message)
+
+
+class EngineNotSetError(ConfigurationError):
+    """Raised when an API method is called without setting engine."""
+
+    def __init__(self, message: str | None = None):
+        if message is None:
+            message = (
+                "Engine not set. Set nekt.engine = 'spark' or 'python', "
+                "or set the NEKT_ENGINE environment variable."
+            )
+        super().__init__(message)
