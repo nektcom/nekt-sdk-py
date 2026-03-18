@@ -108,17 +108,66 @@ class NektModule(module_types.ModuleType):
             )
 
     def _get_engine(self):
-        """Lazy engine initialization (placeholder -- wired in plan 06-02)."""
+        """Lazy engine initialization -- creates the appropriate engine on first call.
+
+        1. Return cached engine if already initialized.
+        2. Resolve config from env vars and validate.
+        3. Lock configuration to prevent changes.
+        4. Create NektAPI, detect cloud provider, get credentials.
+        5. Instantiate PythonEngine or SparkEngine based on engine selection.
+
+        Returns:
+            The initialized engine instance (PythonEngine or SparkEngine).
+        """
         if self._nekt_client is not None:
             return self._nekt_client
 
         self._resolve_config()
         object.__setattr__(self, "_nekt_locked", True)
 
-        # Placeholder: actual engine construction added in plan 06-02
-        raise NotImplementedError(
-            "Engine initialization will be implemented in plan 06-02"
+        # Build NektAPI instance
+        from nekt.api import NektAPI
+        from nekt.config import NektConfig
+        from nekt.services.cloud import CloudService
+        from nekt.types import Environment
+
+        config = NektConfig()
+        config.set_data_access_token(self._nekt_data_access_token)
+        if self._nekt_api_url:
+            config.set_api_url(self._nekt_api_url)
+
+        api = NektAPI(
+            self._nekt_data_access_token,
+            api_url=config.api_url,
+            environment=Environment.LOCAL,
+            token_type=config.get_effective_token_type(),
         )
+
+        # Detect cloud provider and get credentials
+        cloud = CloudService(api)
+        provider_info = cloud.detect_provider()
+        credentials = cloud.get_credentials()
+
+        # Create the appropriate engine
+        if self._nekt_engine == "python":
+            from nekt.engine.python import PythonEngine
+
+            engine_instance = PythonEngine(
+                api=api,
+                provider=provider_info,
+                credentials=credentials,
+            )
+        else:
+            from nekt.engine.spark import SparkEngine
+
+            engine_instance = SparkEngine(
+                api=api,
+                provider=provider_info,
+                credentials=credentials,
+            )
+
+        object.__setattr__(self, "_nekt_client", engine_instance)
+        return engine_instance
 
     # ------------------------------------------------------------------
     # Attribute access
