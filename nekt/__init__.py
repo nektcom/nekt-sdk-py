@@ -170,6 +170,118 @@ class NektModule(module_types.ModuleType):
         return engine_instance
 
     # ------------------------------------------------------------------
+    # Read API methods
+    # ------------------------------------------------------------------
+
+    def load_table(self, *, layer_name: str, table_name: str):
+        """Load a table as a DataFrame.
+
+        The return type depends on the engine: pandas DataFrame for
+        ``engine="python"``, Spark DataFrame for ``engine="spark"``.
+
+        Args:
+            layer_name: Name of the layer.
+            table_name: Name of the table.
+
+        Returns:
+            A pandas or PySpark DataFrame depending on the engine.
+        """
+        return self._get_engine().load_table(layer_name=layer_name, table_name=table_name)
+
+    def load_secret(self, *, key: str) -> str:
+        """Load a secret value by key.
+
+        Args:
+            key: The secret key to retrieve.
+
+        Returns:
+            The secret value.
+        """
+        return self._get_engine().load_secret(key=key)
+
+    def load_volume(self, layer_name: str, volume_name: str) -> list[dict[str, str]]:
+        """Load volume file listings.
+
+        Args:
+            layer_name: Name of the layer.
+            volume_name: Name of the volume.
+
+        Returns:
+            List of file-path dictionaries.
+        """
+        return self._get_engine().load_volume(layer_name=layer_name, volume_name=volume_name)
+
+    def create_volume(
+        self,
+        layer_name: str,
+        volume_name: str,
+        description: str | None = None,
+    ) -> dict:
+        """Create a new volume in a layer.
+
+        Args:
+            layer_name: Name of the layer.
+            volume_name: Name of the volume to create.
+            description: Optional description.
+
+        Returns:
+            Volume metadata (id, name, slug, path, etc.).
+        """
+        return self._get_engine().create_volume(
+            layer_name=layer_name, volume_name=volume_name, description=description
+        )
+
+    def save_file(
+        self,
+        layer_name: str,
+        volume_name: str,
+        file_path: str,
+        file_name: str | None = None,
+        description: str | None = None,
+    ) -> dict:
+        """Save a file to a volume using multipart upload.
+
+        Args:
+            layer_name: Name of the layer.
+            volume_name: Name of the volume.
+            file_path: Local path to the file to upload.
+            file_name: Optional name for the file in the volume.
+            description: Optional description for the file.
+
+        Returns:
+            File metadata (id, name, file_size, file_type, description).
+        """
+        return self._get_engine().save_file(
+            layer_name=layer_name,
+            volume_name=volume_name,
+            file_path=file_path,
+            file_name=file_name,
+            description=description,
+        )
+
+    def get_spark_session(self):
+        """Get the SparkSession from the Spark engine.
+
+        Only available when ``engine="spark"``. Triggers engine
+        initialization if not already initialized.
+
+        Returns:
+            The active SparkSession.
+
+        Raises:
+            EngineError: If engine is not ``"spark"``.
+        """
+        if self._nekt_engine != "spark":
+            from nekt.exceptions import EngineError
+
+            raise EngineError(
+                f"get_spark_session() requires engine='spark'. "
+                f"Current engine: '{self._nekt_engine}'"
+            )
+        engine = self._get_engine()
+        return engine.spark
+
+    # ------------------------------------------------------------------
     # Attribute access
     # ------------------------------------------------------------------
 
