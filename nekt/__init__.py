@@ -122,8 +122,8 @@ class NektModule(module_types.ModuleType):
         if self._nekt_client is not None:
             return self._nekt_client
 
-        self._resolve_config()
         object.__setattr__(self, "_nekt_locked", True)
+        self._resolve_config()
 
         # Build NektAPI instance
         from nekt.api import NektAPI
