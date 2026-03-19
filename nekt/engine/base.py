@@ -141,12 +141,7 @@ class Engine(ABC):
         Returns:
             None. Install nekt-sdk-internal for write support.
         """
-        msg = (
-            "save_table requires nekt-sdk-internal. "
-            "Install it with: pip install nekt-sdk-internal"
-        )
-        logger.warning(msg)
-        print(msg)
+        print("save_table is only available when running on Nekt.")
         return None
 
     def save_dataframe(
@@ -155,7 +150,7 @@ class Engine(ABC):
         path: str,
         format: str = "parquet",
     ) -> None:
-        """Save a DataFrame to cloud storage (**stub -- requires nekt-sdk-internal**).
+        """Save a DataFrame to cloud storage (**stub -- only available on Nekt**).
 
         Args:
             df: DataFrame to save.
@@ -163,12 +158,7 @@ class Engine(ABC):
             format: Output format (default ``"parquet"``).
 
         Returns:
-            None. Install nekt-sdk-internal for write support.
+            None. Only available when running on Nekt.
         """
-        msg = (
-            "save_dataframe requires nekt-sdk-internal. "
-            "Install it with: pip install nekt-sdk-internal"
-        )
-        logger.warning(msg)
-        print(msg)
+        print("save_dataframe is only available when running on Nekt.")
         return None

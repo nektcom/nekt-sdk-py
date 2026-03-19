@@ -245,7 +245,7 @@ class PythonEngine(Engine):
             with open(file_path, "rb") as f:
                 for url_info in presigned_urls:
                     part_number = url_info.get("part_number", len(parts) + 1)
-                    presigned_url = url_info.get("presigned_url")
+                    presigned_url: str = url_info.get("presigned_url", "")
 
                     chunk = f.read(part_size)
                     if not chunk:

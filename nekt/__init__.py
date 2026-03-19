@@ -19,6 +19,7 @@ import importlib.util
 import os
 import sys
 import types as module_types
+from typing import Any
 
 __version__ = "0.7.0"
 
@@ -41,6 +42,12 @@ class NektModule(module_types.ModuleType):
         nekt.engine = "spark"
         nekt.data_access_token = "token"
     """
+
+    _nekt_data_access_token: str | None
+    _nekt_api_url: str | None
+    _nekt_engine: str | None
+    _nekt_client: Any
+    _nekt_locked: bool
 
     def __init__(self, name: str, doc: str | None = None):
         super().__init__(name, doc)
@@ -117,7 +124,7 @@ class NektModule(module_types.ModuleType):
                 "Set nekt.data_access_token or NEKT_DATA_ACCESS_TOKEN."
             )
 
-    def _get_engine(self):
+    def _get_engine(self) -> Any:
         """Lazy engine initialization -- creates the appropriate engine on first call.
 
         1. Return cached engine if already initialized.
@@ -141,13 +148,14 @@ class NektModule(module_types.ModuleType):
         from nekt.services.cloud import CloudService
         from nekt.types import Environment
 
+        token: str = self._nekt_data_access_token  # type: ignore[assignment]
         config = NektConfig()
-        config.set_data_access_token(self._nekt_data_access_token)
+        config.set_data_access_token(token)
         if self._nekt_api_url:
             config.set_api_url(self._nekt_api_url)
 
         api = NektAPI(
-            self._nekt_data_access_token,
+            token,
             api_url=config.api_url,
             environment=Environment.LOCAL,
             token_type=config.get_effective_token_type(),
@@ -183,7 +191,7 @@ class NektModule(module_types.ModuleType):
     # Read API methods
     # ------------------------------------------------------------------
 
-    def load_table(self, *, layer_name: str, table_name: str):
+    def load_table(self, *, layer_name: str, table_name: str) -> Any:
         """Load a table as a DataFrame.
 
         The return type depends on the engine: pandas DataFrame for
@@ -209,7 +217,7 @@ class NektModule(module_types.ModuleType):
         """
         return self._get_engine().load_secret(key=key)
 
-    def load_volume(self, layer_name: str, volume_name: str) -> list[dict[str, str]]:
+    def load_volume(self, layer_name: str, volume_name: str) -> Any:
         """Load volume file listings.
 
         Args:
@@ -226,7 +234,7 @@ class NektModule(module_types.ModuleType):
         layer_name: str,
         volume_name: str,
         description: str | None = None,
-    ) -> dict:
+    ) -> Any:
         """Create a new volume in a layer.
 
         Args:
@@ -248,7 +256,7 @@ class NektModule(module_types.ModuleType):
         file_path: str,
         file_name: str | None = None,
         description: str | None = None,
-    ) -> dict:
+    ) -> Any:
         """Save a file to a volume using multipart upload.
 
         Args:
@@ -269,7 +277,7 @@ class NektModule(module_types.ModuleType):
             description=description,
         )
 
-    def load_delta_table(self, *, layer_name: str, table_name: str):
+    def load_delta_table(self, *, layer_name: str, table_name: str) -> Any:
         """Load a Delta table (Spark DeltaTable object).
 
         Only available when engine="spark".
@@ -293,7 +301,7 @@ class NektModule(module_types.ModuleType):
             )
         return self._get_engine().load_delta_table(layer_name=layer_name, table_name=table_name)
 
-    def get_spark_session(self):
+    def get_spark_session(self) -> Any:
         """Get the SparkSession from the Spark engine.
 
         Only available when ``engine="spark"``. Triggers engine
@@ -319,12 +327,12 @@ class NektModule(module_types.ModuleType):
     # Write stubs -- require nekt-sdk-internal
     # ------------------------------------------------------------------
 
-    def save_table(self, **kwargs):
+    def save_table(self, **kwargs: Any) -> None:
         """Save a table (stub -- requires nekt-sdk-internal)."""
         print("save_table is only available when running on Nekt.")
         return None
 
-    def save_dataframe(self, df, path: str, format: str = "parquet"):
+    def save_dataframe(self, df: Any, path: str, format: str = "parquet") -> None:
         """Save a DataFrame to cloud storage (stub -- only available on Nekt)."""
         print("save_dataframe is only available when running on Nekt.")
         return None
@@ -356,7 +364,7 @@ class NektModule(module_types.ModuleType):
         object.__setattr__(self, '_nekt_user_logger', user_logger)
         return user_logger
 
-    def get_logger(self, name=None):
+    def get_logger(self, name: str | None = None) -> Any:
         """Get a named logger or the default user logger.
 
         Args:
@@ -380,7 +388,7 @@ class NektModule(module_types.ModuleType):
     # Attribute access
     # ------------------------------------------------------------------
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         """Handle attribute reads for configuration and re-exports."""
         if name == "data_access_token":
             return self._nekt_data_access_token
@@ -425,7 +433,7 @@ class NektModule(module_types.ModuleType):
 
         raise AttributeError(f"module 'nekt' has no attribute '{name}'")
 
-    def __setattr__(self, name: str, value):
+    def __setattr__(self, name: str, value: Any) -> None:
         """Handle attribute writes for configuration parameters."""
         # Allow submodule assignment during import system operations
         if isinstance(value, module_types.ModuleType):
@@ -461,7 +469,7 @@ sys.modules[__name__] = _module
 
 # Detect and upgrade to internal module if nekt_internal is installed
 try:
-    from nekt_internal._bootstrap import upgrade_module
+    from nekt_internal._bootstrap import upgrade_module  # type: ignore[import-not-found]
     _module = upgrade_module(_module)
     sys.modules[__name__] = _module
 except ImportError:

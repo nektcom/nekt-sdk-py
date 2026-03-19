@@ -141,7 +141,7 @@ class SparkEngine(Engine):
 
         # Fall back to builder
         try:
-            session = SparkSession.builder.getOrCreate()
+            session = SparkSession.builder.getOrCreate()  # type: ignore[union-attr]
         except Exception as exc:
             raise EngineError(
                 "No active SparkSession found and could not create one"
@@ -153,7 +153,7 @@ class SparkEngine(Engine):
             )
 
         self._spark = session
-        return self._spark
+        return session
 
     # ------------------------------------------------------------------
     # Read implementations
@@ -357,7 +357,7 @@ class SparkEngine(Engine):
             with open(file_path, "rb") as f:
                 for url_info in presigned_urls:
                     part_number = url_info.get("part_number", len(parts) + 1)
-                    presigned_url = url_info.get("presigned_url")
+                    presigned_url: str = url_info.get("presigned_url", "")
 
                     chunk = f.read(part_size)
                     if not chunk:
