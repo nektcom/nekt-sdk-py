@@ -259,6 +259,30 @@ class NektModule(module_types.ModuleType):
             description=description,
         )
 
+    def load_delta_table(self, *, layer_name: str, table_name: str):
+        """Load a Delta table (Spark DeltaTable object).
+
+        Only available when engine="spark".
+
+        Args:
+            layer_name: Name of the layer.
+            table_name: Name of the table.
+
+        Returns:
+            DeltaTable object.
+
+        Raises:
+            EngineError: If engine is not "spark".
+        """
+        if self._nekt_engine != "spark":
+            from nekt.exceptions import EngineError
+
+            raise EngineError(
+                "load_delta_table() requires engine='spark'. "
+                f"Current engine: '{self._nekt_engine}'"
+            )
+        return self._get_engine().load_delta_table(layer_name=layer_name, table_name=table_name)
+
     def get_spark_session(self):
         """Get the SparkSession from the Spark engine.
 
@@ -282,6 +306,71 @@ class NektModule(module_types.ModuleType):
         return engine.spark
 
     # ------------------------------------------------------------------
+    # Write stubs -- require nekt-sdk-internal
+    # ------------------------------------------------------------------
+
+    def save_table(self, **kwargs):
+        """Save a table (stub -- requires nekt-sdk-internal)."""
+        msg = "save_table requires nekt-sdk-internal. Install it with: pip install nekt-sdk-internal"
+        self.logger.warning(msg)
+        print(msg)
+        return None
+
+    def save_dataframe(self, df, path: str, format: str = "parquet"):
+        """Save a DataFrame to cloud storage (stub -- requires nekt-sdk-internal)."""
+        msg = "save_dataframe requires nekt-sdk-internal. Install it with: pip install nekt-sdk-internal"
+        self.logger.warning(msg)
+        print(msg)
+        return None
+
+    # ------------------------------------------------------------------
+    # Logger
+    # ------------------------------------------------------------------
+
+    @property
+    def logger(self):
+        """User-facing logger. Returns a standard Python logger.
+
+        When the internal SDK is installed, this is overridden to return
+        a FluentBit-backed logger.
+        """
+        cached = self.__dict__.get('_nekt_user_logger')
+        if cached is not None:
+            return cached
+
+        import logging
+        user_logger = logging.getLogger("nekt.user")
+        if not user_logger.handlers:
+            user_logger.setLevel(logging.INFO)
+            handler = logging.StreamHandler()
+            handler.setLevel(logging.INFO)
+            user_logger.addHandler(handler)
+            user_logger.propagate = False
+
+        object.__setattr__(self, '_nekt_user_logger', user_logger)
+        return user_logger
+
+    def get_logger(self, name=None):
+        """Get a named logger or the default user logger.
+
+        Args:
+            name: Optional logger name. Messages will be prefixed with [name].
+                  If None, returns the default user logger (same as nekt.logger).
+
+        Returns:
+            A logging.Logger instance.
+        """
+        if name is None:
+            return self.logger
+
+        import logging
+        named = logging.getLogger(f"nekt.user.{name}")
+        if not named.handlers:
+            named.parent = self.logger
+            named.setLevel(logging.INFO)
+        return named
+
+    # ------------------------------------------------------------------
     # Attribute access
     # ------------------------------------------------------------------
 
@@ -295,6 +384,8 @@ class NektModule(module_types.ModuleType):
             return self._nekt_engine
         if name == "_engine":
             return self._nekt_client
+        if name == "logger":
+            return self.logger  # triggers the @property
 
         # Re-exported types (lazy to avoid import cycles)
         if name == "Environment":
@@ -361,3 +452,11 @@ _module.__path__ = __path__
 _module.__package__ = __package__
 _module.__version__ = __version__
 sys.modules[__name__] = _module
+
+# Detect and upgrade to internal module if nekt_internal is installed
+try:
+    from nekt_internal._bootstrap import upgrade_module
+    _module = upgrade_module(_module)
+    sys.modules[__name__] = _module
+except ImportError:
+    pass
