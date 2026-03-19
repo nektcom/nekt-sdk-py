@@ -1,10 +1,9 @@
-"""Engine base class and write-stub response type."""
+"""Engine base class for data-processing operations."""
 
 from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -14,26 +13,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class StubResponse:
-    """Response returned by write-method stubs on the public engine.
-
-    Write operations (``save_table``, ``save_dataframe``) are only available
-    in the internal SDK (``nekt-sdk-internal``).  The public engine returns
-    this object so callers get a clear, inspectable signal instead of an
-    opaque ``NotImplementedError``.
-    """
-
-    success: bool
-    message: str
-
-
 class Engine(ABC):
     """Abstract base class for data-processing engines.
 
     Read methods are abstract -- every concrete engine **must** implement them.
-    Write methods are concrete stubs that return :class:`StubResponse` and log
-    a warning; the internal SDK overrides them with real implementations.
+    Write methods are concrete stubs that return ``None`` and log a warning;
+    the internal SDK overrides them with real implementations.
     """
 
     # ------------------------------------------------------------------
@@ -141,7 +126,7 @@ class Engine(ABC):
         merge_keys: list[str] | None = None,
         schema_evolution: str = "merge",
         expectations: list[Any] | None = None,
-    ) -> StubResponse:
+    ) -> None:
         """Save a DataFrame to storage (**stub -- requires nekt-sdk-internal**).
 
         Args:
@@ -154,21 +139,22 @@ class Engine(ABC):
             expectations: Data quality expectations.
 
         Returns:
-            :class:`StubResponse` with ``success=False``.
+            None. Install nekt-sdk-internal for write support.
         """
         msg = (
             "save_table requires nekt-sdk-internal. "
             "Install it with: pip install nekt-sdk-internal"
         )
         logger.warning(msg)
-        return StubResponse(success=False, message=msg)
+        print(msg)
+        return None
 
     def save_dataframe(
         self,
         df: pd.DataFrame,
         path: str,
         format: str = "parquet",
-    ) -> StubResponse:
+    ) -> None:
         """Save a DataFrame to cloud storage (**stub -- requires nekt-sdk-internal**).
 
         Args:
@@ -177,11 +163,12 @@ class Engine(ABC):
             format: Output format (default ``"parquet"``).
 
         Returns:
-            :class:`StubResponse` with ``success=False``.
+            None. Install nekt-sdk-internal for write support.
         """
         msg = (
             "save_dataframe requires nekt-sdk-internal. "
             "Install it with: pip install nekt-sdk-internal"
         )
         logger.warning(msg)
-        return StubResponse(success=False, message=msg)
+        print(msg)
+        return None

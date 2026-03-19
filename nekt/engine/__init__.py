@@ -1,6 +1,6 @@
 """Data processing engines for the Nekt SDK."""
 
-from nekt.engine.base import Engine, StubResponse
+from nekt.engine.base import Engine
 
 # PythonEngine is optional (requires pyarrow)
 try:
@@ -14,4 +14,4 @@ try:
 except ImportError:
     SparkEngine = None  # type: ignore[assignment,misc]
 
-__all__ = ["Engine", "PythonEngine", "SparkEngine", "StubResponse"]
+__all__ = ["Engine", "PythonEngine", "SparkEngine"]
