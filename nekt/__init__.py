@@ -22,6 +22,15 @@ import types as module_types
 
 __version__ = "0.7.0"
 
+_PUBLIC_ALL = [
+    "Environment", "TokenType", "CloudProvider", "SaveMode",
+    "SchemaEvolutionStrategy", "NektConfig", "NektError",
+    "data_access_token", "api_url", "engine",
+    "load_table", "load_delta_table", "load_secret",
+    "load_volume", "create_volume", "save_file",
+    "get_spark_session", "logger", "get_logger",
+]
+
 
 class NektModule(module_types.ModuleType):
     """Module wrapper that provides attribute-style configuration for the Nekt SDK.
@@ -41,6 +50,7 @@ class NektModule(module_types.ModuleType):
         object.__setattr__(self, "_nekt_engine", None)
         object.__setattr__(self, "_nekt_client", None)
         object.__setattr__(self, "_nekt_locked", False)
+        object.__setattr__(self, "__all__", _PUBLIC_ALL)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -311,16 +321,12 @@ class NektModule(module_types.ModuleType):
 
     def save_table(self, **kwargs):
         """Save a table (stub -- requires nekt-sdk-internal)."""
-        msg = "save_table requires nekt-sdk-internal. Install it with: pip install nekt-sdk-internal"
-        self.logger.warning(msg)
-        print(msg)
+        print("save_table is only available when running on Nekt.")
         return None
 
     def save_dataframe(self, df, path: str, format: str = "parquet"):
-        """Save a DataFrame to cloud storage (stub -- requires nekt-sdk-internal)."""
-        msg = "save_dataframe requires nekt-sdk-internal. Install it with: pip install nekt-sdk-internal"
-        self.logger.warning(msg)
-        print(msg)
+        """Save a DataFrame to cloud storage (stub -- only available on Nekt)."""
+        print("save_dataframe is only available when running on Nekt.")
         return None
 
     # ------------------------------------------------------------------
