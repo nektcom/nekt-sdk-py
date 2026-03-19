@@ -48,6 +48,13 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["nekt"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+markers = [
+    "integration: tests requiring real API credentials (NEKT_DATA_ACCESS_TOKEN)",
+]
+
 [tool.ruff]
 line-length = 160
 target-version = "py311"
