@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 
@@ -57,7 +59,59 @@ def spark():
         .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
         .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-        .config("spark.jars.packages", "io.delta:delta-spark_2.12:3.3.0")
+        .config("spark.jars.packages", "io.delta:delta-spark_2.12:3.3.0,org.apache.hadoop:hadoop-aws:3.3.4")
     )
 
     return builder.getOrCreate()
+
+
+@pytest.fixture(scope="session")
+def integration_spark(spark):
+    """Spark session with cloud credentials for integration tests.
+
+    LOCAL mode: fetches credentials from API (Jupyter token).
+    AWS mode: reads credentials from env vars.
+    """
+    from nekt.types import CloudCredentials, CloudProvider, Environment
+
+    token = os.environ.get("NEKT_DATA_ACCESS_TOKEN")
+    if not token:
+        pytest.skip("NEKT_DATA_ACCESS_TOKEN not set")
+
+    env_str = os.environ.get("NEKT_ENV", "LOCAL").upper()
+
+    if env_str == "LOCAL":
+        from nekt.api import NektAPI
+
+        api = NektAPI(
+            data_access_token=token,
+            api_url=os.environ.get("NEKT_API_URL", "https://api.nekt.ai"),
+            environment=Environment.LOCAL,
+        )
+        credentials = api.get_cloud_credentials()
+    elif env_str == "AWS":
+        credentials = CloudCredentials.from_aws(
+            access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", ""),
+            secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+            session_token=os.environ.get("AWS_SESSION_TOKEN"),
+            region=os.environ.get("AWS_REGION", "us-east-1"),
+        )
+    else:
+        credentials = CloudCredentials.from_gcp(
+            access_token=os.environ.get("GCP_ACCESS_TOKEN", ""),
+            project_id=os.environ.get("GCP_PROJECT_ID", ""),
+        )
+
+    # Configure Spark with cloud credentials for S3 access
+    if credentials.aws_access_key_id:
+        hadoop_conf = spark._jsc.hadoopConfiguration()
+        hadoop_conf.set("fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        hadoop_conf.set("fs.s3a.access.key", credentials.aws_access_key_id)
+        hadoop_conf.set("fs.s3a.secret.key", credentials.aws_secret_access_key or "")
+        hadoop_conf.set("fs.s3a.session.token", credentials.aws_session_token or "")
+        hadoop_conf.set(
+            "fs.s3a.aws.credentials.provider",
+            "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider",
+        )
+
+    return spark

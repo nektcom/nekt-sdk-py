@@ -3,6 +3,13 @@
 # These tests exercise the real API load path and require valid credentials.
 # They are double-gated: both the @pytest.mark.integration marker and the
 # @requires_credentials skip condition must be satisfied.
+#
+# Configurable via env vars:
+#   NEKT_TEST_LAYER  — layer to load from (default: Testing)
+#   NEKT_TEST_TABLE  — table to load (default: titanic)
+#
+# Filter by engine: pytest -m "integration and spark_engine"
+#                    pytest -m "integration and python_engine"
 """Double-gated integration tests for the public SDK."""
 
 import os
@@ -10,7 +17,6 @@ import sys
 
 import pytest
 
-# Retrieve NektModule class for fresh instance creation
 import nekt
 
 NektModule = type(sys.modules["nekt"])
@@ -19,6 +25,9 @@ requires_credentials = pytest.mark.skipif(
     not os.environ.get("NEKT_DATA_ACCESS_TOKEN"),
     reason="NEKT_DATA_ACCESS_TOKEN not set",
 )
+
+TEST_LAYER = os.environ.get("NEKT_TEST_LAYER", "Testing")
+TEST_TABLE = os.environ.get("NEKT_TEST_TABLE", "titanic")
 
 
 def _fresh_module():
@@ -34,6 +43,7 @@ def _fresh_module():
 
 
 @pytest.mark.integration
+@pytest.mark.python_engine
 @requires_credentials
 def test_load_table_python_engine():
     """Load a table via the Python engine and verify it returns a pandas DataFrame."""
@@ -41,19 +51,36 @@ def test_load_table_python_engine():
 
     m = _fresh_module()
     m.engine = "python"
-    # UPDATE: replace with actual test table name if different
-    result = m.load_table(layer_name="raw", table_name="test_table")
+    result = m.load_table(layer_name=TEST_LAYER, table_name=TEST_TABLE)
     assert isinstance(result, pd.DataFrame)
     assert len(result) > 0
 
 
 @pytest.mark.integration
+@pytest.mark.spark_engine
+@requires_credentials
+def test_load_table_spark_engine(integration_spark):
+    """Load a table via the Spark engine and verify it returns a Spark DataFrame.
+
+    The integration_spark fixture creates a session with Delta + hadoop-aws + S3 credentials.
+    SparkEngine.spark picks it up via getActiveSession().
+    """
+    from pyspark.sql import DataFrame as SparkDataFrame
+
+    m = _fresh_module()
+    m.engine = "spark"
+    result = m.load_table(layer_name=TEST_LAYER, table_name=TEST_TABLE)
+    assert isinstance(result, SparkDataFrame)
+    assert result.count() > 0
+
+
+@pytest.mark.integration
+@pytest.mark.python_engine
 @requires_credentials
 def test_load_secret():
     """Load a secret via the API."""
     m = _fresh_module()
     m.engine = "python"
-    # Skip if no known test secret is configured
     test_secret_name = os.environ.get("NEKT_TEST_SECRET_NAME")
     if not test_secret_name:
         pytest.skip("No test secret configured (set NEKT_TEST_SECRET_NAME)")
@@ -63,18 +90,13 @@ def test_load_secret():
 
 
 @pytest.mark.integration
+@pytest.mark.spark_engine
 @requires_credentials
-def test_engine_switch_to_spark(spark):
-    """Verify that setting engine='spark' allows get_spark_session to return a SparkSession."""
+def test_get_spark_session(integration_spark):
+    """Verify the Spark engine initializes and returns a SparkSession."""
     from pyspark.sql import SparkSession
 
     m = _fresh_module()
     m.engine = "spark"
-    # Note: get_spark_session triggers _get_engine which needs full config.
-    # This test verifies the guard does not fire when engine is spark.
-    # Actually calling get_spark_session would require API credentials to
-    # initialize the engine, so we verify the guard passes and the engine
-    # attribute is correctly set.
-    assert m.engine == "spark"
-    # The spark fixture from conftest confirms SparkSession is available
-    assert isinstance(spark, SparkSession)
+    session = m.get_spark_session()
+    assert isinstance(session, SparkSession)
