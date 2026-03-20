@@ -28,7 +28,8 @@ requires_credentials = pytest.mark.skipif(
 
 TEST_LAYER = os.environ.get("NEKT_TEST_LAYER", "Testing")
 TEST_TABLE = os.environ.get("NEKT_TEST_TABLE", "titanic")
-
+TEST_SECRET_NAME = os.environ.get("NEKT_TEST_SECRET_NAME")
+TEST_SECRET_VALUE = os.environ.get("NEKT_TEST_SECRET_VALUE")
 
 def _fresh_module():
     """Create a fresh NektModule instance with credentials from env."""
@@ -81,12 +82,12 @@ def test_load_secret():
     """Load a secret via the API."""
     m = _fresh_module()
     m.engine = "python"
-    test_secret_name = os.environ.get("NEKT_TEST_SECRET_NAME")
-    if not test_secret_name:
+    if not TEST_SECRET_NAME:
         pytest.skip("No test secret configured (set NEKT_TEST_SECRET_NAME)")
-    result = m.load_secret(key=test_secret_name)
+    result = m.load_secret(key=TEST_SECRET_NAME)
     assert isinstance(result, str)
     assert len(result) > 0
+    assert result == TEST_SECRET_VALUE
 
 
 @pytest.mark.integration
