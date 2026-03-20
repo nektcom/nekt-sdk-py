@@ -130,8 +130,10 @@ class NektModule(module_types.ModuleType):
         1. Return cached engine if already initialized.
         2. Resolve config from env vars and validate.
         3. Lock configuration to prevent changes.
-        4. Create NektAPI, detect cloud provider, get credentials.
-        5. Instantiate PythonEngine or SparkEngine based on engine selection.
+        4. Determine environment from NEKT_ENV (default: LOCAL).
+        5. LOCAL: detect cloud provider and credentials from API.
+           AWS/GCP: infer provider from env, get credentials from env vars.
+        6. Instantiate PythonEngine or SparkEngine based on engine selection.
 
         Returns:
             The initialized engine instance (PythonEngine or SparkEngine).
@@ -142,11 +144,16 @@ class NektModule(module_types.ModuleType):
         object.__setattr__(self, "_nekt_locked", True)
         self._resolve_config()
 
-        # Build NektAPI instance
+        import os
+
         from nekt.api import NektAPI
         from nekt.config import NektConfig
         from nekt.services.cloud import CloudService
-        from nekt.types import Environment
+        from nekt.types import CloudCredentials, CloudProvider, Environment
+
+        env_str = os.environ.get("NEKT_ENV", "LOCAL").upper()
+        env_map = {"LOCAL": Environment.LOCAL, "AWS": Environment.AWS, "GCP": Environment.GCP}
+        environment = env_map.get(env_str, Environment.LOCAL)
 
         token: str = self._nekt_data_access_token  # type: ignore[assignment]
         config = NektConfig()
@@ -157,14 +164,31 @@ class NektModule(module_types.ModuleType):
         api = NektAPI(
             token,
             api_url=config.api_url,
-            environment=Environment.LOCAL,
+            environment=environment,
             token_type=config.get_effective_token_type(),
         )
 
-        # Detect cloud provider and get credentials
-        cloud = CloudService(api)
-        provider_info = cloud.detect_provider()
-        credentials = cloud.get_credentials()
+        if environment == Environment.LOCAL:
+            # LOCAL mode: detect provider and credentials from API
+            cloud = CloudService(api)
+            provider_info = cloud.detect_provider()
+            credentials = cloud.get_credentials()
+        elif environment == Environment.AWS:
+            # AWS production: provider is known, credentials from env vars
+            provider_info = CloudProvider.AWS
+            credentials = CloudCredentials.from_aws(
+                access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", ""),
+                secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+                session_token=os.environ.get("AWS_SESSION_TOKEN"),
+                region=os.environ.get("AWS_REGION", "us-east-1"),
+            )
+        else:
+            # GCP production: provider is known, credentials from env vars
+            provider_info = CloudProvider.GCP
+            credentials = CloudCredentials.from_gcp(
+                access_token=os.environ.get("GCP_ACCESS_TOKEN", ""),
+                project_id=os.environ.get("GCP_PROJECT_ID", ""),
+            )
 
         # Create the appropriate engine
         if self._nekt_engine == "python":
