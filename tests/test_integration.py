@@ -101,3 +101,42 @@ def test_get_spark_session(integration_spark):
     m.engine = "spark"
     session = m.get_spark_session()
     assert isinstance(session, SparkSession)
+
+
+# ---------------------------------------------------------------------------
+# Env-var precedence tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.python_engine
+@requires_credentials
+def test_env_var_precedence_python_engine():
+    """Env var token overrides code-set token (Python engine)."""
+    import pandas as pd
+
+    m = _fresh_module()
+    m.engine = "python"
+    # Set a wrong token via code — env var should override it
+    m.data_access_token = "wrong_token_that_would_fail"
+
+    result = m.load_table(layer_name=TEST_LAYER, table_name=TEST_TABLE)
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) > 0
+
+
+@pytest.mark.integration
+@pytest.mark.spark_engine
+@requires_credentials
+def test_env_var_precedence_spark_engine(integration_spark):
+    """Env var token overrides code-set token (Spark engine)."""
+    from pyspark.sql import DataFrame as SparkDataFrame
+
+    m = _fresh_module()
+    m.engine = "spark"
+    # Set a wrong token via code — env var should override it
+    m.data_access_token = "wrong_token_that_would_fail"
+
+    result = m.load_table(layer_name=TEST_LAYER, table_name=TEST_TABLE)
+    assert isinstance(result, SparkDataFrame)
+    assert result.count() > 0

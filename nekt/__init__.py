@@ -80,34 +80,31 @@ class NektModule(module_types.ModuleType):
             )
 
     def _resolve_config(self) -> None:
-        """Resolve config from env vars for any attribute still set to None.
+        """Resolve config, with env vars taking precedence over code-set values.
 
         Validates that engine and data_access_token are available before
         engine initialization.
         """
-        # Env var fallback for each config attribute
-        if self._nekt_data_access_token is None:
-            env_token = os.environ.get("NEKT_DATA_ACCESS_TOKEN")
-            if env_token is not None:
-                object.__setattr__(self, "_nekt_data_access_token", env_token)
+        # Env vars always override code-set values (cloud deployments use correct credentials)
+        env_token = os.environ.get("NEKT_DATA_ACCESS_TOKEN")
+        if env_token is not None:
+            object.__setattr__(self, "_nekt_data_access_token", env_token)
 
-        if self._nekt_api_url is None:
-            env_url = os.environ.get("NEKT_API_URL")
-            if env_url is not None:
-                object.__setattr__(self, "_nekt_api_url", env_url)
+        env_url = os.environ.get("NEKT_API_URL")
+        if env_url is not None:
+            object.__setattr__(self, "_nekt_api_url", env_url)
 
-        if self._nekt_engine is None:
-            env_engine = os.environ.get("NEKT_ENGINE")
-            if env_engine is not None:
-                if env_engine not in ("spark", "python"):
-                    raise ValueError(
-                        f"Invalid NEKT_ENGINE value: '{env_engine}'. "
-                        "engine must be 'spark' or 'python'"
-                    )
-                # Validate dependency for env-var-sourced engine
-                if env_engine == "spark":
-                    self._check_dependency("pyspark", "spark")
-                object.__setattr__(self, "_nekt_engine", env_engine)
+        env_engine = os.environ.get("NEKT_ENGINE")
+        if env_engine is not None:
+            if env_engine not in ("spark", "python"):
+                raise ValueError(
+                    f"Invalid NEKT_ENGINE value: '{env_engine}'. "
+                    "engine must be 'spark' or 'python'"
+                )
+            # Validate dependency for env-var-sourced engine
+            if env_engine == "spark":
+                self._check_dependency("pyspark", "spark")
+            object.__setattr__(self, "_nekt_engine", env_engine)
 
         # After env var resolution, engine must be set
         if self._nekt_engine is None:
