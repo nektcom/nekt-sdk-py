@@ -3,6 +3,12 @@ import os
 import pytest
 
 
+def pytest_report_header():
+    suite = os.environ.get("PYTEST_SUITE_NAME")
+    if suite:
+        return [f"Suite: {suite}"]
+
+
 def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line(
