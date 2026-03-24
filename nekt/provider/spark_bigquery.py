@@ -62,6 +62,8 @@ class SparkBigQueryProvider(DataProvider):
         Raises:
             BigQueryProviderError: If loading the table fails.
         """
+        import os
+
         try:
             reader = (
                 self._spark.read.format("bigquery")
@@ -69,8 +71,15 @@ class SparkBigQueryProvider(DataProvider):
                 .option("cacheExpirationTimeInMinutes", "0")
             )
 
-            if self._credentials and self._credentials.gcp_access_token:
+            # Prefer SA key file for auth (long-lived, works in CI).
+            # Fall back to access token for backward compatibility.
+            sa_key_file = os.environ.get("GCP_SA_KEY_FILE")
+            if sa_key_file:
+                reader = reader.option("credentialsFile", sa_key_file)
+            elif self._credentials and self._credentials.gcp_access_token:
                 reader = reader.option("gcpAccessToken", self._credentials.gcp_access_token)
+
+            if self._credentials and self._credentials.gcp_project_id:
                 reader = reader.option("parentProject", self._credentials.gcp_project_id)
 
             return reader.load()
