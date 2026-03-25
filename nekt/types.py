@@ -18,8 +18,7 @@ class Environment(StrEnum):
     """Supported execution environments."""
 
     LOCAL = "LOCAL"
-    AWS = "AWS"
-    GCP = "GCP"
+    PRODUCTION = "PRODUCTION"
 
 
 class TokenType(StrEnum):

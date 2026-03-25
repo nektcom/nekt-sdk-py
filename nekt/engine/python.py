@@ -299,7 +299,7 @@ class PythonEngine(Engine):
         Returns:
             TableConfig with table metadata.
         """
-        use_s3a = self._environment == Environment.LOCAL and self._cloud_provider == CloudProvider.AWS
+        use_s3a = self._environment != Environment.PRODUCTION and self._cloud_provider == CloudProvider.AWS
 
         return self._api.get_table_details(
             layer_name=layer_name,

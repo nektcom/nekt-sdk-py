@@ -230,7 +230,7 @@ class SparkEngine(Engine):
 
         # Get table path from raw API (need s3_path field)
         params: dict[str, str] = {}
-        if self._environment == Environment.LOCAL:
+        if self._environment != Environment.PRODUCTION:
             params["use_s3a"] = "true"
 
         table_details = self._api.get_table_details_raw(layer_name, table_name, params)

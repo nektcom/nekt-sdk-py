@@ -149,8 +149,7 @@ class NektModule(module_types.ModuleType):
         from nekt.types import CloudCredentials, CloudProvider, Environment
 
         env_str = os.environ.get("NEKT_ENV", "LOCAL").upper()
-        env_map = {"LOCAL": Environment.LOCAL, "AWS": Environment.AWS, "GCP": Environment.GCP}
-        environment = env_map.get(env_str, Environment.LOCAL)
+        environment = Environment(env_str)
 
         token: str = self._nekt_data_access_token  # type: ignore[assignment]
         config = NektConfig()
@@ -170,22 +169,23 @@ class NektModule(module_types.ModuleType):
             cloud = CloudService(api)
             provider_info = cloud.detect_provider()
             credentials = cloud.get_credentials()
-        elif environment == Environment.AWS:
-            # AWS production: provider is known, credentials from env vars
-            provider_info = CloudProvider.AWS
-            credentials = CloudCredentials.from_aws(
-                access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", ""),
-                secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
-                session_token=os.environ.get("AWS_SESSION_TOKEN"),
-                region=os.environ.get("AWS_REGION", "us-east-1"),
-            )
         else:
-            # GCP production: provider is known, credentials from env vars
-            provider_info = CloudProvider.GCP
-            credentials = CloudCredentials.from_gcp(
-                access_token=os.environ.get("GCP_ACCESS_TOKEN", ""),
-                project_id=os.environ.get("GCP_PROJECT_ID", ""),
-            )
+            # PRODUCTION mode: resolve provider from NEKT_CLOUD_PROVIDER
+            cloud_provider = os.environ.get("NEKT_CLOUD_PROVIDER", "AWS").upper()
+            if cloud_provider == "AWS":
+                provider_info = CloudProvider.AWS
+                credentials = CloudCredentials.from_aws(
+                    access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", ""),
+                    secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+                    session_token=os.environ.get("AWS_SESSION_TOKEN"),
+                    region=os.environ.get("AWS_REGION", "us-east-1"),
+                )
+            else:
+                provider_info = CloudProvider.GCP
+                credentials = CloudCredentials.from_gcp(
+                    access_token=os.environ.get("GCP_ACCESS_TOKEN", ""),
+                    project_id=os.environ.get("GCP_PROJECT_ID", ""),
+                )
 
         # Create the appropriate engine
         if self._nekt_engine == "python":

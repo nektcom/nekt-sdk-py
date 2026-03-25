@@ -59,6 +59,23 @@ class TestConfigEnvVars:
         with pytest.raises(ConfigurationError, match="Invalid NEKT_ENGINE"):
             NektConfig()
 
+    def test_env_var_production(self, monkeypatch):
+        from nekt.types import Environment
+        monkeypatch.setenv("NEKT_ENV", "PRODUCTION")
+        config = NektConfig()
+        assert config.environment == Environment.PRODUCTION
+
+    def test_env_var_local(self, monkeypatch):
+        from nekt.types import Environment
+        monkeypatch.setenv("NEKT_ENV", "LOCAL")
+        config = NektConfig()
+        assert config.environment == Environment.LOCAL
+
+    def test_env_var_invalid_environment_raises(self, monkeypatch):
+        monkeypatch.setenv("NEKT_ENV", "AWS")
+        with pytest.raises(ValueError):
+            NektConfig()
+
 
 class TestConfigLocking:
     """Verify lock behavior: warns and skips set after lock."""
