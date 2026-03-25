@@ -171,7 +171,11 @@ class NektModule(module_types.ModuleType):
             credentials = cloud.get_credentials()
         else:
             # PRODUCTION mode: resolve provider from NEKT_CLOUD_PROVIDER
-            cloud_provider = os.environ.get("NEKT_CLOUD_PROVIDER", "AWS").upper()
+            cloud_provider = os.environ.get("NEKT_CLOUD_PROVIDER", "").upper()
+            if cloud_provider not in ("AWS", "GCP"):
+                raise ValueError(
+                    f"Invalid NEKT_CLOUD_PROVIDER: '{cloud_provider}'. Must be 'AWS' or 'GCP'."
+                )
             if cloud_provider == "AWS":
                 provider_info = CloudProvider.AWS
                 credentials = CloudCredentials.from_aws(
