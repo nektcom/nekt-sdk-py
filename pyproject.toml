@@ -1,17 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "nekt-sdk"
-version = "0.3.3"
-description = "Add your description here"
+version = "0.7.0"
+description = "Nekt SDK for data lake operations"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
-    "delta-spark==3.3.0",
-    "pyspark==3.5.5",
-    "requests>=2.32.3",
+    # HTTP & resilience
+    "requests>=2.32.0",
+    "tenacity>=8.2.0",
+    # Data processing
+    "pyarrow>=17.0.0",
+    "pandas>=2.2.0",
+    # Cloud storage
+    "s3fs>=2024.2.0",
+    "gcsfs>=2024.2.0",
+    # PySpark + Delta Spark (exact pins — must match each other)
+    "pyspark==3.5.6",
+    "delta-spark==3.3.2",
+    # Delta Lake (Rust-based)
+    "deltalake>=0.24.0",
+    # Cloud data warehouses
+    "google-cloud-bigquery>=3.27.0",
+    "pyathena[arrow]>=3.8.0",
+    # SQL dialect conversion
+    "sqlglot>=26.0.0",
+    # AWS SDK
+    "boto3>=1.35.0",
+    # Retry logic
+    "backoff>=2.2.0",
+    # Data quality validation
+    "great-expectations>=1.5.2",
+    "great-expectations[spark]>=1.5.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=6.2.0",
+    "ruff>=0.9.0",
+    "pyright>=1.1.390",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["nekt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+markers = [
+    "integration: tests requiring real API credentials (NEKT_DATA_ACCESS_TOKEN)",
+    "spark_engine: tests using the Spark engine",
+    "python_engine: tests using the Python engine",
 ]
 
 [tool.ruff]
 line-length = 160
+target-version = "py311"
 
 [tool.ruff.lint]
 ignore = []

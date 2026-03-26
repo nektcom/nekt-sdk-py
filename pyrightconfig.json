@@ -1,0 +1,6 @@
+{
+    "include": ["nekt"],
+    "typeCheckingMode": "standard",
+    "pythonVersion": "3.11",
+    "reportMissingTypeStubs": false
+}
