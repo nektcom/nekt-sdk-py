@@ -1,10 +1,15 @@
 """
-Iceberg integration tests for the public SDK.
+Iceberg integration tests for the public SDK (read-only).
 
-Loads a real Delta table from the Nekt API, monkey-patches the config to
-point at a real Iceberg table on S3 Table Buckets, then reads via PyIceberg.
+Uses two Iceberg tables in the S3 Table Bucket:
+  - raw.titanic          — read-only source (seeded by seed script in internal SDK)
+  - raw.titanic_output   — not used here (write tests are in the internal SDK)
 
-Post-deploy: remove the monkey-patch once the API serves Iceberg fields natively.
+Reads the Iceberg source table via both Python and Spark engines to verify
+the full PyIceberg / Spark catalog flow works against real AWS infrastructure.
+
+The API response is monkey-patched since the backend isn't deployed with
+Iceberg support yet. Post-deploy: remove the monkey-patch.
 
 Requires:
   NEKT_DATA_ACCESS_TOKEN — API token for nekt-dev
@@ -35,10 +40,12 @@ ICEBERG_TABLE_BUCKET_ARN = os.environ.get(
     "NEKT_ICEBERG_TABLE_BUCKET_ARN",
     "arn:aws:s3tables:us-east-1:637423198484:bucket/nekt-target-s3-iceberg-internal-tests",
 )
-ICEBERG_TABLE_NAME = "nscd_t01_ft_pk"
 ICEBERG_NAMESPACE = "raw"
 ICEBERG_CATALOG_ALIAS = "s3tb_001"
 ICEBERG_CATALOG_NAME = "s3tablescatalog/nekt-target-s3-iceberg-internal-tests"
+
+# Read-only source table (seeded by scripts/seed_iceberg_titanic.py)
+ICEBERG_SOURCE_TABLE = "titanic"
 
 
 def _fresh_module():
@@ -54,14 +61,10 @@ def _fresh_module():
 
 
 def _patch_to_iceberg(table_config: TableConfig) -> TableConfig:
-    """Monkey-patch a Delta TableConfig to point at the real Iceberg table.
-
-    Preserves the original config's provider/credentials but swaps the table
-    identity and format to Iceberg. Post-deploy this function is removed.
-    """
+    """Monkey-patch a Delta TableConfig to point at the Iceberg source table."""
     return TableConfig(
         layer_name=table_config.layer_name,
-        table_name=ICEBERG_TABLE_NAME,
+        table_name=ICEBERG_SOURCE_TABLE,
         provider=table_config.provider,
         path=table_config.path,
         database_name=table_config.database_name,
@@ -86,13 +89,12 @@ def _patch_to_iceberg(table_config: TableConfig) -> TableConfig:
 @pytest.mark.python_engine
 @requires_credentials
 def test_load_iceberg_table_python_engine():
-    """Load an Iceberg table via PyIceberg and verify it returns a pandas DataFrame."""
+    """Load the Iceberg source table via PyIceberg and verify it returns a pandas DataFrame."""
     import pandas as pd
 
     m = _fresh_module()
     m.engine = "python"
 
-    # Trigger engine initialization, then patch _get_table_config
     engine = m._get_engine()
     original_get_table_config = engine._get_table_config
 
@@ -104,7 +106,7 @@ def test_load_iceberg_table_python_engine():
         result = engine.load_table(TEST_LAYER, TEST_TABLE)
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) > 0, "Iceberg table should have data"
+    assert len(result) > 0, "Iceberg source table (titanic) has no data — run scripts/seed_iceberg_titanic.py"
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +119,7 @@ def test_load_iceberg_table_python_engine():
 @pytest.mark.spark_engine
 @requires_credentials
 def test_load_iceberg_table_spark_engine(integration_spark):
-    """Load an Iceberg table via Spark and verify it returns a Spark DataFrame."""
+    """Load the Iceberg source table via Spark and verify it returns a Spark DataFrame."""
     from pyspark.sql import DataFrame as SparkDataFrame
 
     m = _fresh_module()
@@ -134,4 +136,4 @@ def test_load_iceberg_table_spark_engine(integration_spark):
         result = engine.load_table(TEST_LAYER, TEST_TABLE)
 
     assert isinstance(result, SparkDataFrame)
-    assert result.count() > 0, "Iceberg table should have data"
+    assert result.count() > 0, "Iceberg source table (titanic) has no data — run scripts/seed_iceberg_titanic.py"
