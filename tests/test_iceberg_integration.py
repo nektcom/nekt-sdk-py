@@ -105,3 +105,33 @@ def test_load_iceberg_table_python_engine():
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) > 0, "Iceberg table should have data"
+
+
+# ---------------------------------------------------------------------------
+# Spark Engine — reads Iceberg via Spark catalog
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.iceberg
+@pytest.mark.spark_engine
+@requires_credentials
+def test_load_iceberg_table_spark_engine(integration_spark):
+    """Load an Iceberg table via Spark and verify it returns a Spark DataFrame."""
+    from pyspark.sql import DataFrame as SparkDataFrame
+
+    m = _fresh_module()
+    m.engine = "spark"
+
+    engine = m._get_engine()
+    original_get_table_details = engine._api.get_table_details
+
+    def patched_get_table_details(*args, **kwargs):
+        config = original_get_table_details(*args, **kwargs)
+        return _patch_to_iceberg(config)
+
+    with patch.object(engine._api, "get_table_details", side_effect=patched_get_table_details):
+        result = engine.load_table(TEST_LAYER, TEST_TABLE)
+
+    assert isinstance(result, SparkDataFrame)
+    assert result.count() > 0, "Iceberg table should have data"
