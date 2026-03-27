@@ -25,11 +25,8 @@ dependencies = [
     "deltalake>=0.24.0",
     # Cloud data warehouses
     "google-cloud-bigquery>=3.27.0",
-    "pyathena[arrow]>=3.8.0",
     # SQL dialect conversion
     "sqlglot>=26.0.0",
-    # AWS SDK
-    "boto3>=1.35.0",
     # Retry logic
     "backoff>=2.2.0",
     # Data quality validation
