@@ -11,7 +11,7 @@ import requests
 
 from nekt.engine.base import Engine
 from nekt.exceptions import EngineError, FileUploadError
-from nekt.types import CloudCredentials, CloudProvider, Environment
+from nekt.types import CloudCredentials, CloudProvider, Environment, TableFormat
 
 if TYPE_CHECKING:
     import pyspark.sql
@@ -247,6 +247,18 @@ class SparkEngine(Engine):
         logger.info("[%s/%s] Loading table as Spark DataFrame", layer_name, table_name)
 
         if self._cloud_provider == CloudProvider.AWS:
+            # Check if this is an Iceberg table
+            table_config = self._api.get_table_details(
+                layer_name=layer_name,
+                table_name=table_name,
+                provider=self._cloud_provider,
+                include_delta_fields=True,
+                include_layer_database_name=True,
+                use_s3a=self._environment == Environment.LOCAL,
+            )
+            if table_config.table_format == TableFormat.ICEBERG:
+                return self._load_iceberg_table(table_config)
+
             delta_table = self.load_delta_table(layer_name, table_name)
             return delta_table.toDF()
         elif self._cloud_provider == CloudProvider.GCP:
@@ -294,6 +306,60 @@ class SparkEngine(Engine):
         logger.info("[%s/%s] Loading Delta table from %s", layer_name, table_name, s3_path)
         provider = self._get_data_provider()
         return provider.load(s3_path)
+
+    def _resolve_iceberg_catalog_alias(self, table_bucket_arn: str) -> str:
+        """Resolve the Spark catalog alias for an Iceberg table bucket ARN.
+
+        Iterates over Spark catalog configurations (``s3tb_001`` through
+        ``s3tb_099``) to find one whose ``warehouse`` matches the given ARN.
+
+        Args:
+            table_bucket_arn: The S3 Table Bucket ARN to match.
+
+        Returns:
+            The catalog alias (e.g. ``s3tb_001``).
+
+        Raises:
+            ValueError: If no matching catalog is found.
+        """
+        for i in range(1, 100):
+            alias = f"s3tb_{i:03d}"
+            try:
+                warehouse = self.spark.conf.get(f"spark.sql.catalog.{alias}.warehouse")
+                if warehouse == table_bucket_arn:
+                    return alias
+            except Exception:
+                break
+        raise ValueError(f"No Spark catalog found for table bucket ARN: {table_bucket_arn}")
+
+    def _load_iceberg_table(self, table_config: Any) -> pyspark.sql.DataFrame:
+        """Load an Iceberg table as a Spark DataFrame.
+
+        Args:
+            table_config: TableConfig with iceberg_config populated.
+
+        Returns:
+            Spark DataFrame.
+
+        Raises:
+            EngineError: If iceberg_config is missing or no catalog is found.
+        """
+        if table_config.iceberg_config is None:
+            raise EngineError(
+                f"Iceberg config missing for table {table_config.layer_name}/{table_config.table_name}"
+            )
+
+        iceberg = table_config.iceberg_config
+        catalog_alias = self._resolve_iceberg_catalog_alias(iceberg.table_bucket_arn)
+        fqn = f"{catalog_alias}.{iceberg.namespace}.{table_config.table_name}"
+
+        logger.info(
+            "[%s/%s] Loading Iceberg table: %s",
+            table_config.layer_name,
+            table_config.table_name,
+            fqn,
+        )
+        return self.spark.table(fqn)
 
     def load_secret(self, key: str) -> str:
         """Load a secret value by key.
