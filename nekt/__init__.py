@@ -154,6 +154,7 @@ class NektModule(module_types.ModuleType):
         token: str = self._nekt_data_access_token  # type: ignore[assignment]
         config = NektConfig()
         config.set_data_access_token(token)
+        config.set_environment(environment)
         if self._nekt_api_url:
             config.set_api_url(self._nekt_api_url)
 

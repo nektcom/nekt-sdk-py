@@ -148,7 +148,7 @@ class NektConfig:
 
     @property
     def environment(self) -> Environment | None:
-        """The execution environment (LOCAL, AWS, GCP)."""
+        """The execution environment (LOCAL, PRODUCTION)."""
         return self._environment
 
     def set_environment(self, value: Environment) -> None:
