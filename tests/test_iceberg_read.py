@@ -1,4 +1,4 @@
-"""Tests for Iceberg table loading: catalog alias resolution and engine routing."""
+"""Tests for Iceberg table loading via Spark and Python engines."""
 
 from unittest.mock import MagicMock, patch
 
@@ -7,84 +7,8 @@ import pytest
 from nekt.types import CloudProvider, Environment, IcebergConfig, TableConfig, TableFormat
 
 
-class TestIcebergCatalogAliasResolution:
-    """Verify _resolve_iceberg_catalog_alias finds the correct catalog."""
-
-    def _make_spark_engine(self, spark_mock):
-        """Create a SparkEngine with a mocked SparkSession."""
-        from nekt.engine.spark import SparkEngine
-
-        api = MagicMock()
-        engine = SparkEngine(
-            api=api,
-            provider=CloudProvider.AWS,
-            credentials=None,
-            environment=Environment.LOCAL,
-        )
-        engine._spark = spark_mock
-        return engine
-
-    def test_finds_matching_catalog(self):
-        target_arn = "arn:aws:s3tables:us-east-1:123456789012:bucket/my-bucket"
-
-        spark_mock = MagicMock()
-
-        def conf_get(key):
-            if key == "spark.sql.catalog.s3tb_001.warehouse":
-                return "arn:aws:s3tables:us-east-1:999999999999:bucket/other-bucket"
-            if key == "spark.sql.catalog.s3tb_002.warehouse":
-                return target_arn
-            raise Exception("not found")
-
-        spark_mock.conf.get = conf_get
-
-        engine = self._make_spark_engine(spark_mock)
-        alias = engine._resolve_iceberg_catalog_alias(target_arn)
-        assert alias == "s3tb_002"
-
-    def test_finds_first_catalog(self):
-        target_arn = "arn:aws:s3tables:us-east-1:123:bucket/first"
-
-        spark_mock = MagicMock()
-
-        def conf_get(key):
-            if key == "spark.sql.catalog.s3tb_001.warehouse":
-                return target_arn
-            raise Exception("not found")
-
-        spark_mock.conf.get = conf_get
-
-        engine = self._make_spark_engine(spark_mock)
-        alias = engine._resolve_iceberg_catalog_alias(target_arn)
-        assert alias == "s3tb_001"
-
-    def test_raises_when_no_matching_catalog(self):
-        spark_mock = MagicMock()
-        spark_mock.conf.get.side_effect = Exception("not found")
-
-        engine = self._make_spark_engine(spark_mock)
-        with pytest.raises(ValueError, match="No Spark catalog found"):
-            engine._resolve_iceberg_catalog_alias("arn:aws:s3tables:us-east-1:123:bucket/missing")
-
-    def test_raises_when_no_arn_matches(self):
-        spark_mock = MagicMock()
-
-        def conf_get(key):
-            if key == "spark.sql.catalog.s3tb_001.warehouse":
-                return "arn:aws:s3tables:us-east-1:111:bucket/a"
-            if key == "spark.sql.catalog.s3tb_002.warehouse":
-                return "arn:aws:s3tables:us-east-1:222:bucket/b"
-            raise Exception("not found")
-
-        spark_mock.conf.get = conf_get
-
-        engine = self._make_spark_engine(spark_mock)
-        with pytest.raises(ValueError, match="No Spark catalog found"):
-            engine._resolve_iceberg_catalog_alias("arn:aws:s3tables:us-east-1:999:bucket/nomatch")
-
-
 class TestSparkEngineIcebergLoading:
-    """Verify SparkEngine routes Iceberg tables correctly."""
+    """Verify SparkEngine routes Iceberg tables correctly using catalog_alias from API."""
 
     def test_load_iceberg_table_calls_spark_table(self):
         from nekt.engine.spark import SparkEngine
@@ -107,18 +31,49 @@ class TestSparkEngineIcebergLoading:
             path="s3://bucket/path",
             table_format=TableFormat.ICEBERG,
             iceberg_config=IcebergConfig(
-                catalog_name="my_catalog",
+                catalog_name="s3tablescatalog/my-bucket",
+                catalog_alias="s3tb_001",
                 namespace="my_ns",
                 table_bucket_arn="arn:aws:s3tables:us-east-1:123:bucket/b",
             ),
         )
 
-        # Mock catalog resolution
-        with patch.object(engine, "_resolve_iceberg_catalog_alias", return_value="s3tb_001"):
-            result = engine._load_iceberg_table(table_config)
+        result = engine._load_iceberg_table(table_config)
 
         spark_mock.table.assert_called_once_with("s3tb_001.my_ns.events")
         assert result == spark_mock.table.return_value
+
+    def test_load_iceberg_table_raises_when_alias_missing(self):
+        from nekt.engine.spark import SparkEngine
+        from nekt.exceptions import EngineError
+
+        spark_mock = MagicMock()
+        api = MagicMock()
+
+        engine = SparkEngine(
+            api=api,
+            provider=CloudProvider.AWS,
+            credentials=None,
+            environment=Environment.LOCAL,
+        )
+        engine._spark = spark_mock
+
+        table_config = TableConfig(
+            layer_name="bronze",
+            table_name="events",
+            provider=CloudProvider.AWS,
+            path="s3://bucket/path",
+            table_format=TableFormat.ICEBERG,
+            iceberg_config=IcebergConfig(
+                catalog_name="cat",
+                catalog_alias="",
+                namespace="ns",
+                table_bucket_arn="arn:aws:s3tables:us-east-1:123:bucket/b",
+            ),
+        )
+
+        with pytest.raises(EngineError, match="catalog_alias missing"):
+            engine._load_iceberg_table(table_config)
 
 
 class TestPythonEngineIcebergLoading:
@@ -140,6 +95,7 @@ class TestPythonEngineIcebergLoading:
             table_format=TableFormat.ICEBERG,
             iceberg_config=IcebergConfig(
                 catalog_name="cat",
+                catalog_alias="s3tb_001",
                 namespace="ns",
                 table_bucket_arn="arn:aws:s3tables:us-east-1:123:bucket/b",
             ),

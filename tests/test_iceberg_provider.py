@@ -35,6 +35,7 @@ class TestCreateCatalog:
 
         config = IcebergConfig(
             catalog_name="s3tablescatalog/my-bucket",
+            catalog_alias="s3tb_001",
             namespace="raw",
             table_bucket_arn="arn:aws:s3tables:us-east-1:123456789012:bucket/my-bucket",
         )
@@ -90,6 +91,7 @@ class TestLoad:
     def test_load_returns_arrow_table(self):
         config = IcebergConfig(
             catalog_name="cat",
+            catalog_alias="s3tb_001",
             namespace="my_ns",
             table_bucket_arn="arn:aws:s3tables:us-east-1:123:bucket/b",
         )
@@ -109,6 +111,7 @@ class TestLoad:
     def test_load_requires_table_name(self):
         config = IcebergConfig(
             catalog_name="cat",
+            catalog_alias="s3tb_001",
             namespace="ns",
             table_bucket_arn="arn:aws:s3tables:us-east-1:123:bucket/b",
         )
@@ -120,6 +123,7 @@ class TestLoad:
     def test_load_wraps_exceptions(self):
         config = IcebergConfig(
             catalog_name="cat",
+            catalog_alias="s3tb_001",
             namespace="ns",
             table_bucket_arn="arn:aws:s3tables:us-east-1:123:bucket/b",
         )

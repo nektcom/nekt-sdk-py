@@ -30,16 +30,19 @@ class TestIcebergConfig:
     def test_creation(self):
         config = IcebergConfig(
             catalog_name="my_catalog",
+            catalog_alias="s3tb_001",
             namespace="my_namespace",
             table_bucket_arn="arn:aws:s3tables:us-east-1:123456789012:bucket/my-bucket",
         )
         assert config.catalog_name == "my_catalog"
+        assert config.catalog_alias == "s3tb_001"
         assert config.namespace == "my_namespace"
         assert config.table_bucket_arn == "arn:aws:s3tables:us-east-1:123456789012:bucket/my-bucket"
 
     def test_is_frozen(self):
         config = IcebergConfig(
             catalog_name="cat",
+            catalog_alias="s3tb_001",
             namespace="ns",
             table_bucket_arn="arn:aws:s3tables:us-east-1:123:bucket/b",
         )

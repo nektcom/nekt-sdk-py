@@ -307,33 +307,11 @@ class SparkEngine(Engine):
         provider = self._get_data_provider()
         return provider.load(s3_path)
 
-    def _resolve_iceberg_catalog_alias(self, table_bucket_arn: str) -> str:
-        """Resolve the Spark catalog alias for an Iceberg table bucket ARN.
-
-        Iterates over Spark catalog configurations (``s3tb_001`` through
-        ``s3tb_099``) to find one whose ``warehouse`` matches the given ARN.
-
-        Args:
-            table_bucket_arn: The S3 Table Bucket ARN to match.
-
-        Returns:
-            The catalog alias (e.g. ``s3tb_001``).
-
-        Raises:
-            ValueError: If no matching catalog is found.
-        """
-        for i in range(1, 100):
-            alias = f"s3tb_{i:03d}"
-            try:
-                warehouse = self.spark.conf.get(f"spark.sql.catalog.{alias}.warehouse")
-                if warehouse == table_bucket_arn:
-                    return alias
-            except Exception:
-                break
-        raise ValueError(f"No Spark catalog found for table bucket ARN: {table_bucket_arn}")
-
     def _load_iceberg_table(self, table_config: Any) -> pyspark.sql.DataFrame:
         """Load an Iceberg table as a Spark DataFrame.
+
+        Uses the ``catalog_alias`` from the backend API (e.g. ``s3tb_001``)
+        which matches the Spark catalog configured in EMR spark-submit parameters.
 
         Args:
             table_config: TableConfig with iceberg_config populated.
@@ -342,7 +320,7 @@ class SparkEngine(Engine):
             Spark DataFrame.
 
         Raises:
-            EngineError: If iceberg_config is missing or no catalog is found.
+            EngineError: If iceberg_config is missing or catalog_alias is empty.
         """
         if table_config.iceberg_config is None:
             raise EngineError(
@@ -350,8 +328,12 @@ class SparkEngine(Engine):
             )
 
         iceberg = table_config.iceberg_config
-        catalog_alias = self._resolve_iceberg_catalog_alias(iceberg.table_bucket_arn)
-        fqn = f"{catalog_alias}.{iceberg.namespace}.{table_config.table_name}"
+        if not iceberg.catalog_alias:
+            raise EngineError(
+                f"Iceberg catalog_alias missing for table {table_config.layer_name}/{table_config.table_name}"
+            )
+
+        fqn = f"{iceberg.catalog_alias}.{iceberg.namespace}.{table_config.table_name}"
 
         logger.info(
             "[%s/%s] Loading Iceberg table: %s",

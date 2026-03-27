@@ -76,6 +76,7 @@ class IcebergConfig:
     """Apache Iceberg specific configuration."""
 
     catalog_name: str
+    catalog_alias: str
     namespace: str
     table_bucket_arn: str
 
@@ -165,6 +166,7 @@ class TableConfig:
         if provider == CloudProvider.AWS and table_format == TableFormat.ICEBERG:
             iceberg_config = IcebergConfig(
                 catalog_name=api_data.get("iceberg_catalog_name", ""),
+                catalog_alias=api_data.get("iceberg_catalog_alias", ""),
                 namespace=api_data.get("iceberg_namespace", ""),
                 table_bucket_arn=api_data.get("iceberg_table_bucket_arn", ""),
             )
