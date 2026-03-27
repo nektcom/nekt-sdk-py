@@ -318,6 +318,7 @@ class NektModule(module_types.ModuleType):
         Raises:
             EngineError: If engine is not "spark".
         """
+        engine = self._get_engine()
         if self._nekt_engine != "spark":
             from nekt.exceptions import EngineError
 
@@ -325,7 +326,7 @@ class NektModule(module_types.ModuleType):
                 "load_delta_table() requires engine='spark'. "
                 f"Current engine: '{self._nekt_engine}'"
             )
-        return self._get_engine().load_delta_table(layer_name=layer_name, table_name=table_name)
+        return engine.load_delta_table(layer_name=layer_name, table_name=table_name)
 
     def get_spark_session(self) -> Any:
         """Get the SparkSession from the Spark engine.
@@ -339,6 +340,7 @@ class NektModule(module_types.ModuleType):
         Raises:
             EngineError: If engine is not ``"spark"``.
         """
+        engine = self._get_engine()
         if self._nekt_engine != "spark":
             from nekt.exceptions import EngineError
 
@@ -346,7 +348,6 @@ class NektModule(module_types.ModuleType):
                 f"get_spark_session() requires engine='spark'. "
                 f"Current engine: '{self._nekt_engine}'"
             )
-        engine = self._get_engine()
         return engine.spark
 
     # ------------------------------------------------------------------
