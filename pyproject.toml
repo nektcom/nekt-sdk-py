@@ -54,6 +54,7 @@ markers = [
     "integration: tests requiring real API credentials (NEKT_DATA_ACCESS_TOKEN)",
     "spark_engine: tests using the Spark engine",
     "python_engine: tests using the Python engine",
+    "iceberg: tests using Iceberg tables on S3 Table Buckets",
 ]
 
 [tool.ruff]
