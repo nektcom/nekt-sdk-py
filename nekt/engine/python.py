@@ -12,7 +12,7 @@ import requests
 from nekt.engine.base import Engine
 from nekt.exceptions import EngineError, FileUploadError
 from nekt.provider.base import DataProvider
-from nekt.types import CloudCredentials, CloudProvider, Environment
+from nekt.types import CloudCredentials, CloudProvider, Environment, TableFormat
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -116,6 +116,32 @@ class PythonEngine(Engine):
 
         # Get table configuration from API
         table_config = self._get_table_config(layer_name, table_name)
+
+        # Iceberg tables: use PyIceberg provider
+        if table_config.table_format == TableFormat.ICEBERG:
+            if table_config.iceberg_config is None:
+                raise EngineError(
+                    f"Iceberg config missing for table {layer_name}/{table_name}. "
+                    "Ensure the table has an S3 Table Bucket assigned."
+                )
+            try:
+                from nekt.provider.iceberg import IcebergProvider
+            except ImportError:
+                raise EngineError(
+                    "pyiceberg is required for loading Iceberg tables. "
+                    "Install it with: pip install 'pyiceberg[s3fs]'"
+                )
+            iceberg_provider = IcebergProvider(
+                credentials=self._credentials,
+                iceberg_config=table_config.iceberg_config,
+            )
+            arrow_table = iceberg_provider.load(
+                table_config.path,
+                table_name=table_config.table_name,
+            )
+            df = arrow_table.to_pandas()
+            logger.info("[%s/%s] Loaded %d rows (Iceberg)", layer_name, table_name, len(df))
+            return df
 
         # Load via data provider
         if self._data_provider is None:
