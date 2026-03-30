@@ -137,11 +137,36 @@ class SparkEngine(Engine):
         session = SparkSession.getActiveSession()
         if session is not None:
             self._spark = session
+            self._configure_credentials()
             return self._spark
 
-        # Fall back to builder
+        # Fall back to builder with Delta Lake and cloud storage packages
+        logger.info("No active SparkSession found — creating one with Delta Lake support")
+
+        packages = ["io.delta:delta-spark_2.12:3.3.0"]
+        if self._cloud_provider == CloudProvider.AWS:
+            packages.append("org.apache.hadoop:hadoop-aws:3.3.4")
+        elif self._cloud_provider == CloudProvider.GCP:
+            packages.append(
+                "com.google.cloud.spark:spark-bigquery-with-dependencies_2.12:0.43.1"
+            )
+
         try:
-            session = SparkSession.builder.getOrCreate()  # type: ignore[union-attr]
+            session = (
+                SparkSession.builder  # type: ignore[union-attr]
+                .appName("nekt")
+                .master("local[*]")
+                .config(
+                    "spark.sql.extensions",
+                    "io.delta.sql.DeltaSparkSessionExtension",
+                )
+                .config(
+                    "spark.sql.catalog.spark_catalog",
+                    "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+                )
+                .config("spark.jars.packages", ",".join(packages))
+                .getOrCreate()
+            )
         except Exception as exc:
             raise EngineError(
                 "No active SparkSession found and could not create one"
@@ -153,7 +178,34 @@ class SparkEngine(Engine):
             )
 
         self._spark = session
+        self._configure_credentials()
         return session
+
+    def _configure_credentials(self) -> None:
+        """Set cloud credentials on the Hadoop configuration.
+
+        For AWS, configures the S3A filesystem with temporary credentials
+        obtained from the Nekt API.  For GCP, credentials are handled by
+        the BigQuery provider at query time.
+        """
+        if (
+            self._spark is None
+            or self._credentials is None
+            or self._environment != Environment.LOCAL
+        ):
+            return
+
+        if self._cloud_provider == CloudProvider.AWS and self._credentials.aws_access_key_id:
+            hadoop_conf = self._spark._jsc.hadoopConfiguration()
+            hadoop_conf.set("fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+            hadoop_conf.set("fs.s3a.access.key", self._credentials.aws_access_key_id)
+            hadoop_conf.set("fs.s3a.secret.key", self._credentials.aws_secret_access_key or "")
+            hadoop_conf.set("fs.s3a.session.token", self._credentials.aws_session_token or "")
+            hadoop_conf.set(
+                "fs.s3a.aws.credentials.provider",
+                "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider",
+            )
+            logger.info("AWS credentials configured on Hadoop S3A filesystem")
 
     # ------------------------------------------------------------------
     # Read implementations
