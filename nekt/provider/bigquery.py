@@ -117,10 +117,11 @@ class BigQueryProvider(DataProvider):
             # Build credentials for client
             gcp_creds = None
             project = self._project
-            if self._credentials and self._credentials.gcp_access_token:
-                from google.oauth2.credentials import Credentials
+            if self._credentials:
+                if self._credentials.gcp_access_token:
+                    from google.oauth2.credentials import Credentials
 
-                gcp_creds = Credentials(token=self._credentials.gcp_access_token)
+                    gcp_creds = Credentials(token=self._credentials.gcp_access_token)
                 if self._credentials.gcp_project_id:
                     project = self._credentials.gcp_project_id
 

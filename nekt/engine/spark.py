@@ -307,11 +307,57 @@ class SparkEngine(Engine):
         provider = self._get_data_provider()
         return provider.load(s3_path)
 
+    def _ensure_iceberg_catalog(self, iceberg_config: Any) -> None:
+        """Register the Iceberg REST catalog in the Spark session if not already present.
+
+        In production (EMR), catalogs are pre-configured via spark-submit.
+        In LOCAL mode, we register them dynamically from the iceberg config.
+        """
+        catalog_alias = iceberg_config.catalog_alias
+        table_bucket_arn = iceberg_config.table_bucket_arn
+        if not catalog_alias or not table_bucket_arn:
+            return
+
+        prefix = f"spark.sql.catalog.{catalog_alias}"
+
+        try:
+            if self.spark.conf.get(prefix, ""):
+                return
+        except Exception:
+            pass
+
+        arn_parts = table_bucket_arn.split(":")
+        region = arn_parts[3] if len(arn_parts) > 3 else "us-east-1"
+
+        self.spark.conf.set(prefix, "org.apache.iceberg.spark.SparkCatalog")
+        self.spark.conf.set(f"{prefix}.catalog-impl", "org.apache.iceberg.rest.RESTCatalog")
+        self.spark.conf.set(f"{prefix}.uri", f"https://s3tables.{region}.amazonaws.com/iceberg")
+        self.spark.conf.set(f"{prefix}.warehouse", table_bucket_arn)
+        self.spark.conf.set(f"{prefix}.rest.sigv4-enabled", "true")
+        self.spark.conf.set(f"{prefix}.rest.signing-region", region)
+        self.spark.conf.set(f"{prefix}.rest.signing-name", "s3tables")
+
+        # The Iceberg SigV4 signer and S3FileIO use the AWS SDK v2 default
+        # credential/region chain.  In LOCAL mode, credentials come from the
+        # Nekt API (STS tokens), so we set Java system properties.
+        jvm = self.spark._jvm
+        jvm.System.setProperty("aws.region", region)
+        if self._credentials:
+            if self._credentials.aws_access_key_id:
+                jvm.System.setProperty("aws.accessKeyId", self._credentials.aws_access_key_id)
+            if self._credentials.aws_secret_access_key:
+                jvm.System.setProperty("aws.secretAccessKey", self._credentials.aws_secret_access_key)
+            if self._credentials.aws_session_token:
+                jvm.System.setProperty("aws.sessionToken", self._credentials.aws_session_token)
+
+        logger.info("Registered Iceberg catalog '%s' for table bucket %s", catalog_alias, table_bucket_arn)
+
     def _load_iceberg_table(self, table_config: Any) -> pyspark.sql.DataFrame:
         """Load an Iceberg table as a Spark DataFrame.
 
         Uses the ``catalog_alias`` from the backend API (e.g. ``s3tb_001``)
         which matches the Spark catalog configured in EMR spark-submit parameters.
+        In LOCAL mode, the catalog is registered dynamically if not already present.
 
         Args:
             table_config: TableConfig with iceberg_config populated.
@@ -333,6 +379,7 @@ class SparkEngine(Engine):
                 f"Iceberg catalog_alias missing for table {table_config.layer_name}/{table_config.table_name}"
             )
 
+        self._ensure_iceberg_catalog(iceberg)
         fqn = f"{iceberg.catalog_alias}.{iceberg.namespace}.{table_config.table_name}"
 
         logger.info(

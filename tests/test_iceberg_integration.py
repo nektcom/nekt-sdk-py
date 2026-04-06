@@ -32,6 +32,11 @@ requires_credentials = pytest.mark.skipif(
     reason="NEKT_DATA_ACCESS_TOKEN not set",
 )
 
+requires_aws = pytest.mark.skipif(
+    os.environ.get("NEKT_CLOUD_PROVIDER", "").upper() != "AWS",
+    reason="Iceberg via S3Tables is AWS-only",
+)
+
 TEST_LAYER = os.environ.get("NEKT_TEST_LAYER", "Testing")
 TEST_TABLE = os.environ.get("NEKT_TEST_TABLE", "titanic")
 
@@ -88,6 +93,7 @@ def _patch_to_iceberg(table_config: TableConfig) -> TableConfig:
 @pytest.mark.iceberg
 @pytest.mark.python_engine
 @requires_credentials
+@requires_aws
 def test_load_iceberg_table_python_engine():
     """Load the Iceberg source table via PyIceberg and verify it returns a pandas DataFrame."""
     import pandas as pd
@@ -118,6 +124,7 @@ def test_load_iceberg_table_python_engine():
 @pytest.mark.iceberg
 @pytest.mark.spark_engine
 @requires_credentials
+@requires_aws
 def test_load_iceberg_table_spark_engine(integration_spark):
     """Load the Iceberg source table via Spark and verify it returns a Spark DataFrame."""
     from pyspark.sql import DataFrame as SparkDataFrame
