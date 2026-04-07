@@ -25,6 +25,8 @@ dependencies = [
     "deltalake>=0.24.0",
     # Apache Iceberg (PyIceberg with S3 support)
     "pyiceberg[s3fs]>=0.8.0",
+    # AWS SDK (needed for PyIceberg SigV4 auth with S3 Table Buckets)
+    "boto3>=1.35.0",
     # Cloud data warehouses
     "google-cloud-bigquery>=3.27.0",
     # SQL dialect conversion

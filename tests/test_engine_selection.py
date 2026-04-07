@@ -35,16 +35,23 @@ class TestEngineGuards:
     """Verify engine-type guards on spark-only methods."""
 
     def test_get_spark_session_wrong_engine_raises(self):
+        from unittest.mock import MagicMock
+
         m = _fresh_module()
         m.engine = "python"
-        with pytest.raises(EngineError, match="get_spark_session\\(\\) requires engine='spark'"):
-            m.get_spark_session()
+        # Mock _get_engine to skip API calls — we're testing the guard, not init
+        with patch.object(type(m), "_get_engine", return_value=MagicMock()):
+            with pytest.raises(EngineError, match="get_spark_session\\(\\) requires engine='spark'"):
+                m.get_spark_session()
 
     def test_load_delta_table_wrong_engine_raises(self):
+        from unittest.mock import MagicMock
+
         m = _fresh_module()
         m.engine = "python"
-        with pytest.raises(EngineError, match="load_delta_table\\(\\) requires engine='spark'"):
-            m.load_delta_table(layer_name="raw", table_name="test")
+        with patch.object(type(m), "_get_engine", return_value=MagicMock()):
+            with pytest.raises(EngineError, match="load_delta_table\\(\\) requires engine='spark'"):
+                m.load_delta_table(layer_name="raw", table_name="test")
 
 
 class TestMissingDependency:
