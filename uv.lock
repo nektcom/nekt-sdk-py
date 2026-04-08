@@ -1539,7 +1539,6 @@ version = "0.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "backoff" },
-    { name = "boto3" },
     { name = "delta-spark" },
     { name = "deltalake" },
     { name = "gcsfs" },
@@ -1547,7 +1546,7 @@ dependencies = [
     { name = "great-expectations", extra = ["spark"] },
     { name = "pandas" },
     { name = "pyarrow" },
-    { name = "pyiceberg", extra = ["s3fs"] },
+    { name = "pyiceberg", extra = ["rest-sigv4", "s3fs"] },
     { name = "pyspark" },
     { name = "requests" },
     { name = "sqlglot" },
@@ -1565,7 +1564,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "backoff", specifier = ">=2.2.0" },
-    { name = "boto3", specifier = ">=1.35.0" },
     { name = "delta-spark", specifier = "==3.3.2" },
     { name = "deltalake", specifier = ">=0.24.0" },
     { name = "gcsfs", specifier = ">=2023.1.0" },
@@ -1574,7 +1572,7 @@ requires-dist = [
     { name = "great-expectations", extras = ["spark"], specifier = ">=1.5.2" },
     { name = "pandas", specifier = ">=2.2.0" },
     { name = "pyarrow", specifier = ">=17.0.0" },
-    { name = "pyiceberg", extras = ["s3fs"], specifier = ">=0.8.0" },
+    { name = "pyiceberg", extras = ["s3fs", "rest-sigv4"], specifier = ">=0.11.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.390" },
     { name = "pyspark", specifier = "==3.5.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
@@ -2141,6 +2139,9 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+rest-sigv4 = [
+    { name = "boto3" },
+]
 s3fs = [
     { name = "s3fs" },
 ]

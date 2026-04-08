@@ -22,10 +22,8 @@ dependencies = [
     "delta-spark==3.3.2",
     # Delta Lake (Rust-based)
     "deltalake>=0.24.0",
-    # Apache Iceberg (PyIceberg with S3 support)
-    "pyiceberg[s3fs]>=0.11.0",
-    # AWS SDK (needed for PyIceberg SigV4 auth with S3 Table Buckets)
-    "boto3>=1.35.0",
+    # Apache Iceberg (PyIceberg with S3 + SigV4 support; boto3 comes via rest-sigv4)
+    "pyiceberg[s3fs,rest-sigv4]>=0.11.0",
     # Cloud data warehouses
     "google-cloud-bigquery>=3.27.0",
     # SQL dialect conversion
