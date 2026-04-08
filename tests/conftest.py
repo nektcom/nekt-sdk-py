@@ -16,6 +16,12 @@ def pytest_configure(config):
         "integration: tests requiring real API credentials (NEKT_DATA_ACCESS_TOKEN)",
     )
 
+    # Set GOOGLE_APPLICATION_CREDENTIALS from GCP_SA_KEY_FILE early so all tests
+    # (including non-Spark Python engine tests) use the correct SA credentials.
+    sa_key_file = os.environ.get("GCP_SA_KEY_FILE", "")
+    if sa_key_file and os.environ.get("NEKT_CLOUD_PROVIDER", "").upper() == "GCP":
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = sa_key_file
+
 
 @pytest.fixture(scope="session")
 def spark():
@@ -30,6 +36,9 @@ def spark():
 
     # Set Java home if not already set
     if "JAVA_HOME" not in os.environ:
+        import shutil
+        import subprocess
+
         system = platform.system()
 
         if system == "Darwin":
@@ -57,13 +66,48 @@ def spark():
             if os.path.exists(java_home):
                 os.environ["JAVA_HOME"] = java_home
                 break
+        else:
+            # Fallback: find a working java binary on PATH.
+            # Iterate all PATH entries because macOS has a /usr/bin/java stub
+            # that fails when no JDK is installed, and it may shadow a real
+            # JDK later in PATH (e.g. Nix-managed).
+            path_dirs = os.environ.get("PATH", "").split(os.pathsep)
+            for d in path_dirs:
+                java_bin = os.path.join(d, "java")
+                if not os.path.isfile(java_bin):
+                    continue
+                try:
+                    result = subprocess.run([java_bin, "-version"], capture_output=True, timeout=5)
+                    if result.returncode != 0:
+                        continue
+                except (subprocess.TimeoutExpired, OSError):
+                    continue
+                java_real = os.path.realpath(java_bin)
+                bin_dir = os.path.dirname(java_real)
+                home_candidate = os.path.dirname(bin_dir)
+                if os.path.basename(home_candidate) == "Home":
+                    os.environ["JAVA_HOME"] = home_candidate
+                else:
+                    os.environ["JAVA_HOME"] = home_candidate
+                break
+
+    # Set GOOGLE_APPLICATION_CREDENTIALS for GCP before Spark starts.
+    cloud_provider = os.environ.get("NEKT_CLOUD_PROVIDER", "").upper()
+    if cloud_provider == "GCP":
+        sa_key_file = os.environ.get("GCP_SA_KEY_FILE", "")
+        if sa_key_file:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = sa_key_file
 
     builder = (
         SparkSession.builder.appName("nekt-test")
         .master("local[*]")
         .config("spark.sql.adaptive.enabled", "false")
         .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+        .config(
+            "spark.sql.extensions",
+            "io.delta.sql.DeltaSparkSessionExtension,"
+            "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+        )
         .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
         .config(
             "spark.jars.packages",
@@ -71,6 +115,8 @@ def spark():
                 "io.delta:delta-spark_2.12:3.3.0",
                 "org.apache.hadoop:hadoop-aws:3.3.4",
                 "com.google.cloud.spark:spark-bigquery-with-dependencies_2.12:0.43.1",
+                "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.7.1",
+                "org.apache.iceberg:iceberg-aws-bundle:1.7.1",
             ]),
         )
     )

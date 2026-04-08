@@ -96,6 +96,12 @@ class BigQueryProviderError(ProviderError):
     pass
 
 
+class IcebergProviderError(ProviderError):
+    """Raised when Iceberg operations fail."""
+
+    pass
+
+
 class ParquetProviderError(ProviderError):
     """Raised when Parquet file operations fail."""
 

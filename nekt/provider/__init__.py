@@ -14,6 +14,12 @@ try:
 except ImportError:
     BigQueryProvider = None  # type: ignore[assignment,misc]
 
+# IcebergProvider is optional (requires pyiceberg)
+try:
+    from nekt.provider.iceberg import IcebergProvider
+except ImportError:
+    IcebergProvider = None  # type: ignore[assignment,misc]
+
 # Parquet providers are optional (require s3fs/gcsfs)
 try:
     from nekt.provider.parquet import S3ParquetProvider
@@ -40,6 +46,7 @@ __all__ = [
     "DataProvider",
     "DeltaProvider",
     "BigQueryProvider",
+    "IcebergProvider",
     "S3ParquetProvider",
     "GCSParquetProvider",
     "SparkDeltaProvider",

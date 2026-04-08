@@ -29,6 +29,13 @@ class TokenType(StrEnum):
     PIPELINE = "pipeline"  # Production pipelines (X-Pipeline-Run-Token)
 
 
+class TableFormat(StrEnum):
+    """Supported table formats."""
+
+    DELTA = "DELTA"
+    ICEBERG = "ICEBERG"
+
+
 class SaveMode(StrEnum):
     """Supported save modes for tables."""
 
@@ -65,6 +72,16 @@ class ColumnExpectations:
 
 
 @dataclass(frozen=True, slots=True)
+class IcebergConfig:
+    """Apache Iceberg specific configuration."""
+
+    catalog_name: str
+    catalog_alias: str
+    namespace: str
+    table_bucket_arn: str
+
+
+@dataclass(frozen=True, slots=True)
 class DeltaConfig:
     """Delta Lake specific configuration."""
 
@@ -90,8 +107,14 @@ class TableConfig:
     # AWS Glue region (for catalog operations)
     glue_region_name: str | None = None
 
+    # Table format (AWS only)
+    table_format: TableFormat = TableFormat.DELTA
+
     # Delta-specific config (AWS only)
     delta_config: DeltaConfig | None = None
+
+    # Iceberg-specific config (AWS only)
+    iceberg_config: IcebergConfig | None = None
 
     # Data quality expectations
     expectations: list[ColumnExpectations] = field(default_factory=list)
@@ -125,6 +148,9 @@ class TableConfig:
                 )
                 expectations.append(column_expectations)
 
+        # Parse table format (AWS only, defaults to DELTA)
+        table_format = TableFormat(api_data.get("table_format", "DELTA"))
+
         # Parse delta config (AWS only)
         delta_config = None
         if provider == CloudProvider.AWS:
@@ -133,6 +159,16 @@ class TableConfig:
                 optimize_on_write=api_data.get("delta_optimize_on_write", False) or False,
                 z_order_columns=api_data.get("delta_z_order_columns", []) or [],
                 log_retention_duration=api_data.get("delta_log_retention_duration"),
+            )
+
+        # Parse iceberg config (AWS only, when table_format is ICEBERG)
+        iceberg_config = None
+        if provider == CloudProvider.AWS and table_format == TableFormat.ICEBERG:
+            iceberg_config = IcebergConfig(
+                catalog_name=api_data.get("iceberg_catalog_name", ""),
+                catalog_alias=api_data.get("iceberg_catalog_alias", ""),
+                namespace=api_data.get("iceberg_namespace", ""),
+                table_bucket_arn=api_data.get("iceberg_table_bucket_arn", ""),
             )
 
         # Determine path based on provider
@@ -151,7 +187,9 @@ class TableConfig:
             database_name=api_data.get("layer_database_name"),
             database_id=api_data.get("database_id"),
             glue_region_name=api_data.get("glue_region_name"),
+            table_format=table_format,
             delta_config=delta_config,
+            iceberg_config=iceberg_config,
             expectations=expectations,
         )
 

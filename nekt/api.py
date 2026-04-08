@@ -223,6 +223,8 @@ class NektAPI:
             params["include_delta_fields"] = "true"
         if include_layer_database_name:
             params["include_layer_database_name"] = "true"
+        if provider == CloudProvider.AWS:
+            params["include_iceberg_fields"] = "true"
         if use_s3a and provider == CloudProvider.AWS:
             params["use_s3a"] = "true"
 

@@ -25,7 +25,8 @@ __version__ = "0.7.0"
 
 _PUBLIC_ALL = [
     "Environment", "TokenType", "CloudProvider", "SaveMode",
-    "SchemaEvolutionStrategy", "NektConfig", "NektError",
+    "SchemaEvolutionStrategy", "TableFormat", "IcebergConfig",
+    "NektConfig", "NektError",
     "data_access_token", "api_url", "engine",
     "load_table", "load_delta_table", "load_secret",
     "load_volume", "create_volume", "save_file",
@@ -457,6 +458,14 @@ class NektModule(module_types.ModuleType):
             from nekt.exceptions import NektError
 
             return NektError
+        if name == "TableFormat":
+            from nekt.types import TableFormat
+
+            return TableFormat
+        if name == "IcebergConfig":
+            from nekt.types import IcebergConfig
+
+            return IcebergConfig
 
         raise AttributeError(f"module 'nekt' has no attribute '{name}'")
 

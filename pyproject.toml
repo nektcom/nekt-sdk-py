@@ -23,6 +23,10 @@ dependencies = [
     "delta-spark==3.3.2",
     # Delta Lake (Rust-based)
     "deltalake>=0.24.0",
+    # Apache Iceberg (PyIceberg with S3 support)
+    "pyiceberg[s3fs]>=0.8.0",
+    # AWS SDK (needed for PyIceberg SigV4 auth with S3 Table Buckets)
+    "boto3>=1.35.0",
     # Cloud data warehouses
     "google-cloud-bigquery>=3.27.0",
     # SQL dialect conversion
@@ -52,6 +56,7 @@ markers = [
     "integration: tests requiring real API credentials (NEKT_DATA_ACCESS_TOKEN)",
     "spark_engine: tests using the Spark engine",
     "python_engine: tests using the Python engine",
+    "iceberg: tests using Iceberg tables on S3 Table Buckets",
 ]
 
 [tool.ruff]
