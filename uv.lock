@@ -1550,7 +1550,6 @@ dependencies = [
     { name = "pyiceberg", extra = ["s3fs"] },
     { name = "pyspark" },
     { name = "requests" },
-    { name = "s3fs" },
     { name = "sqlglot" },
     { name = "tenacity" },
 ]
@@ -1569,7 +1568,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.35.0" },
     { name = "delta-spark", specifier = "==3.3.2" },
     { name = "deltalake", specifier = ">=0.24.0" },
-    { name = "gcsfs", specifier = ">=2024.2.0" },
+    { name = "gcsfs", specifier = ">=2023.1.0" },
     { name = "google-cloud-bigquery", specifier = ">=3.27.0" },
     { name = "great-expectations", specifier = ">=1.5.2" },
     { name = "great-expectations", extras = ["spark"], specifier = ">=1.5.2" },
@@ -1582,7 +1581,6 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.2.0" },
     { name = "requests", specifier = ">=2.33.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.0" },
-    { name = "s3fs", specifier = ">=2024.2.0" },
     { name = "sqlglot", specifier = ">=26.0.0" },
     { name = "tenacity", specifier = ">=8.2.0" },
 ]

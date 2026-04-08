@@ -149,7 +149,7 @@ class TableConfig:
                 expectations.append(column_expectations)
 
         # Parse table format (AWS only, defaults to DELTA)
-        table_format = TableFormat(api_data.get("table_format", "DELTA"))
+        table_format = TableFormat(api_data.get("table_format", "DELTA").upper())
 
         # Parse delta config (AWS only)
         delta_config = None
