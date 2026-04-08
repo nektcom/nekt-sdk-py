@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     # HTTP & resilience
-    "requests>=2.32.0",
+    "requests>=2.33.0",
     "tenacity>=8.2.0",
     # Data processing
     "pyarrow>=17.0.0",
