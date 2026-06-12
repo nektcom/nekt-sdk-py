@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
+import os
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
-from typing import Any
+from typing import Any, Callable
 
 import requests
 from requests.exceptions import ConnectionError, Timeout
@@ -20,6 +22,7 @@ from tenacity import (
 from nekt.exceptions import (
     APIError,
     AuthenticationError,
+    FileUploadError,
     SecretNotFoundError,
     TableNotFoundError,
     VolumeNotFoundError,
@@ -144,9 +147,7 @@ class NektAPI:
 
         # 5xx: transient, trigger retry
         if status >= 500:
-            raise TransientAPIError(
-                f"Server error ({status}) for {context}: {response.text}"
-            )
+            raise TransientAPIError(f"Server error ({status}) for {context}: {response.text}")
 
         # 401/403: authentication error (no retry)
         if status in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
@@ -329,9 +330,7 @@ class NektAPI:
 
         # Cache with expiration
         self._credentials_cache = credentials
-        self._credentials_expires_at = datetime.now(timezone.utc) + timedelta(
-            minutes=CREDENTIAL_CACHE_DURATION_MINUTES
-        )
+        self._credentials_expires_at = datetime.now(timezone.utc) + timedelta(minutes=CREDENTIAL_CACHE_DURATION_MINUTES)
 
         logger.debug(
             "Fetched fresh credentials, cached until %s",
@@ -561,3 +560,266 @@ class NektAPI:
 
         response = self._session.post(url, json=payload)
         self._check_response(response, f"complete upload for volume {layer_name}/{volume_name}/{file_id}")
+
+    @_api_retry
+    def create_volume_file_by_volume_id(
+        self,
+        volume_identifier: str,
+        name: str,
+        file_size: int,
+        file_type: str,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a volume file by volume id (layer inferred) and get presigned URLs.
+
+        Same as ``create_volume_file`` but targets the layerless endpoint, for
+        runs that know only the volume id.
+
+        Args:
+            volume_identifier: Id of the volume.
+            name: Name of the file.
+            file_size: Size of the file in bytes.
+            file_type: MIME type of the file.
+            description: Optional description.
+
+        Returns:
+            Dict containing file metadata and presigned_url_list for upload.
+        """
+        if not volume_identifier:
+            raise ValueError("Volume identifier is required")
+
+        url = f"{self._api_url}/api/v1/i/volumes/{volume_identifier}/files/"
+
+        payload: dict[str, Any] = {
+            "name": name,
+            "file_size": file_size,
+            "file_type": file_type,
+        }
+        if description:
+            payload["description"] = description
+
+        response = self._session.post(url, json=payload)
+        self._check_response(response, f"create volume file in volume {volume_identifier}")
+
+        return response.json()
+
+    @_api_retry
+    def complete_volume_file_upload_by_volume_id(
+        self,
+        volume_identifier: str,
+        file_id: str,
+        parts: list[dict[str, Any]],
+    ) -> None:
+        """Complete a multipart upload by volume id (layer inferred).
+
+        Same as ``complete_volume_file_upload`` but targets the layerless endpoint.
+
+        Args:
+            volume_identifier: ID of the volume.
+            file_id: ID of the volume file.
+            parts: List of dicts with 'etag' and 'part_number' keys.
+        """
+        if not volume_identifier:
+            raise ValueError("Volume identifier is required")
+
+        url = f"{self._api_url}/api/v1/i/volumes/{volume_identifier}/files/{file_id}/complete/"
+        response = self._session.post(url, json={"file_upload_parts": parts})
+        self._check_response(response, f"complete upload for volume {volume_identifier}/{file_id}")
+
+    def upload_file(
+        self,
+        layer_name: str,
+        volume_name: str,
+        file_path: str,
+        file_name: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload a local file to a volume (by layer + volume name) via multipart.
+
+        Performs the full 3-step upload: create file entry (presigned URLs) ->
+        PUT each part -> complete.
+
+        Args:
+            layer_name: Name of the layer.
+            volume_name: Name of the volume.
+            file_path: Local path to the file to upload.
+            file_name: Optional name for the file in the volume (defaults to the
+                local file's basename).
+            description: Optional description for the file.
+
+        Returns:
+            File metadata: ``id``, ``name``, ``file_size``, ``file_type``,
+            ``description``.
+
+        Raises:
+            FileUploadError: If the file is missing, or any upload step fails.
+        """
+        return self._run_file_upload(
+            file_path=file_path,
+            file_name=file_name,
+            description=description,
+            target=f"{layer_name}/{volume_name}",
+            create=lambda name, size, ftype: self.create_volume_file(
+                layer_name=layer_name,
+                volume_name=volume_name,
+                name=name,
+                file_size=size,
+                file_type=ftype,
+                description=description,
+            ),
+            complete=lambda file_id, parts: self.complete_volume_file_upload(
+                layer_name=layer_name,
+                volume_name=volume_name,
+                file_id=file_id,
+                parts=parts,
+            ),
+        )
+
+    def upload_file_by_volume_id(
+        self,
+        volume_identifier: str,
+        file_path: str,
+        file_name: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload a local file to a volume by id (layer inferred) via multipart.
+
+        Identical to ``upload_file`` but targets the layerless volume endpoints,
+        for runs that know only the volume id.
+
+        Args:
+            volume_identifier: Id of the volume.
+            file_path: Local path to the file to upload.
+            file_name: Optional name for the file in the volume (defaults to the
+                local file's basename).
+            description: Optional description for the file.
+
+        Returns:
+            File metadata: ``id``, ``name``, ``file_size``, ``file_type``,
+            ``description``.
+
+        Raises:
+            FileUploadError: If the file is missing, or any upload step fails.
+        """
+        return self._run_file_upload(
+            file_path=file_path,
+            file_name=file_name,
+            description=description,
+            target=volume_identifier,
+            create=lambda name, size, ftype: self.create_volume_file_by_volume_id(
+                volume_identifier=volume_identifier,
+                name=name,
+                file_size=size,
+                file_type=ftype,
+                description=description,
+            ),
+            complete=lambda file_id, parts: self.complete_volume_file_upload_by_volume_id(
+                volume_identifier=volume_identifier,
+                file_id=file_id,
+                parts=parts,
+            ),
+        )
+
+    def _run_file_upload(
+        self,
+        *,
+        file_path: str,
+        file_name: str | None,
+        description: str | None,
+        target: str,
+        create: Callable[[str, int, str], dict[str, Any]],
+        complete: Callable[[str, list[dict[str, Any]]], None],
+    ) -> dict[str, Any]:
+        """Shared 3-step upload used by both upload_file variants."""
+        if not os.path.exists(file_path):
+            raise FileUploadError(f"File not found: {file_path}")
+
+        file_size = os.path.getsize(file_path)
+        name = file_name or os.path.basename(file_path)
+        file_type, _ = mimetypes.guess_type(name)
+        file_type = file_type or "application/octet-stream"
+
+        logger.info("[%s] Uploading file %s (%d bytes)", target, name, file_size)
+
+        # Step 1: register the file and get presigned URLs.
+        try:
+            response = create(name, file_size, file_type)
+        except Exception as e:
+            raise FileUploadError(f"Failed to create volume file: {e}") from e
+
+        file_id: str = response["id"]
+        presigned_urls: list = response.get("presigned_url_list", [])
+        if not presigned_urls:
+            raise FileUploadError("No presigned URLs returned from API")
+
+        # Step 2: upload the file across the presigned URLs.
+        parts = self._upload_parts(file_path, file_size, presigned_urls)
+
+        # Step 3: complete the multipart upload.
+        try:
+            complete(file_id, parts)
+        except Exception as e:
+            raise FileUploadError(f"Failed to complete upload: {e}") from e
+
+        logger.info("[%s] File %s uploaded (id=%s)", target, name, file_id)
+        return {
+            "id": file_id,
+            "name": name,
+            "file_size": file_size,
+            "file_type": file_type,
+            "description": description,
+        }
+
+    def _upload_parts(
+        self,
+        file_path: str,
+        file_size: int,
+        presigned_urls: list,
+    ) -> list[dict[str, Any]]:
+        """PUT the file across the presigned URLs and return the part list.
+
+        The API may return either a flat list of URL strings (one per part) or a
+        list of dicts ({part_number, presigned_url}). For the flat list, split the
+        file into len(urls) equal parts; for the dict list, use fixed 100 MB chunks.
+        """
+        is_url_strings = isinstance(presigned_urls[0], str)
+        part_size = (
+            -(-file_size // len(presigned_urls))  # ceil-divide into N equal parts
+            if is_url_strings
+            else 100 * 1024 * 1024
+        )
+        parts: list[dict[str, Any]] = []
+        try:
+            with open(file_path, "rb") as f:
+                for idx, url_info in enumerate(presigned_urls, start=1):
+                    if isinstance(url_info, str):
+                        presigned_url, part_number = url_info, idx
+                    else:
+                        presigned_url = url_info.get("presigned_url", "")
+                        part_number = url_info.get("part_number", idx)
+
+                    chunk = f.read(part_size)
+                    if not chunk:
+                        break
+
+                    etag = self._upload_part(presigned_url, chunk, part_number)
+                    parts.append({"etag": etag, "part_number": part_number})
+        except requests.RequestException as e:
+            raise FileUploadError(f"Failed to upload file part: {e}") from e
+        except OSError as e:
+            raise FileUploadError(f"Failed to read file: {e}") from e
+        return parts
+
+    @_api_retry
+    def _upload_part(self, presigned_url: str, chunk: bytes, part_number: int) -> str:
+        """PUT a single part to its presigned URL, returning its ETag.
+
+        Retries on transient errors (5xx / connection / timeout) like the other
+        API calls; 4xx are raised immediately.
+        """
+        logger.debug("Uploading part %d (%d bytes)", part_number, len(chunk))
+        response = requests.put(presigned_url, data=chunk)
+        if response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise TransientAPIError(f"Server error ({response.status_code}) uploading part {part_number}: {response.text}")
+        response.raise_for_status()
+        return response.headers.get("ETag", "").strip('"')

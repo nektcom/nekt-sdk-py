@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import logging
-import mimetypes
-import os
 from typing import TYPE_CHECKING, Any
 
-import requests
-
 from nekt.engine.base import Engine
-from nekt.exceptions import EngineError, FileUploadError
+from nekt.exceptions import EngineError
 from nekt.types import CloudCredentials, CloudProvider, Environment, TableFormat
 
 if TYPE_CHECKING:
@@ -465,81 +461,12 @@ class SparkEngine(Engine):
             FileUploadError: If the file is not found, upload fails,
                 or completion fails.
         """
-        # Validate file exists
-        if not os.path.exists(file_path):
-            raise FileUploadError(f"File not found: {file_path}")
-
-        # Compute metadata
-        file_size = os.path.getsize(file_path)
-        name = file_name or os.path.basename(file_path)
-        file_type, _ = mimetypes.guess_type(file_path)
-        file_type = file_type or "application/octet-stream"
-
-        logger.info("[%s/%s] Saving file %s (%d bytes)", layer_name, volume_name, name, file_size)
-
-        # Step 1: Create volume file and get presigned URLs
-        try:
-            response = self._api.create_volume_file(
-                layer_name=layer_name,
-                volume_name=volume_name,
-                name=name,
-                file_size=file_size,
-                file_type=file_type,
-                description=description,
-            )
-        except Exception as e:
-            raise FileUploadError(f"Failed to create volume file: {e}") from e
-
-        file_id: str = response["id"]
-        presigned_urls: list[dict[str, Any]] = response.get("presigned_url_list", [])
-
-        if not presigned_urls:
-            raise FileUploadError("No presigned URLs returned from API")
-
-        # Step 2: Upload in 100 MB chunks
-        part_size = 100 * 1024 * 1024  # 100 MB
-        parts: list[dict[str, Any]] = []
-
-        try:
-            with open(file_path, "rb") as f:
-                for url_info in presigned_urls:
-                    part_number = url_info.get("part_number", len(parts) + 1)
-                    presigned_url: str = url_info.get("presigned_url", "")
-
-                    chunk = f.read(part_size)
-                    if not chunk:
-                        break
-
-                    logger.debug("Uploading part %d (%d bytes)", part_number, len(chunk))
-
-                    upload_response = requests.put(presigned_url, data=chunk)
-                    upload_response.raise_for_status()
-
-                    etag = upload_response.headers.get("ETag", "").strip('"')
-                    parts.append({"etag": etag, "part_number": part_number})
-
-        except requests.RequestException as e:
-            raise FileUploadError(f"Failed to upload file part: {e}") from e
-        except OSError as e:
-            raise FileUploadError(f"Failed to read file: {e}") from e
-
-        # Step 3: Complete multipart upload
-        try:
-            self._api.complete_volume_file_upload(
-                layer_name=layer_name,
-                volume_name=volume_name,
-                file_id=file_id,
-                parts=parts,
-            )
-        except Exception as e:
-            raise FileUploadError(f"Failed to complete upload: {e}") from e
-
-        logger.info("[%s/%s] File %s saved", layer_name, volume_name, name)
-
-        return {
-            "id": file_id,
-            "name": name,
-            "file_size": file_size,
-            "file_type": file_type,
-            "description": description,
-        }
+        # Orchestration lives in the API client so it can be reused without an
+        # engine (e.g. by Singer taps). See NektAPI.upload_file.
+        return self._api.upload_file(
+            layer_name=layer_name,
+            volume_name=volume_name,
+            file_path=file_path,
+            file_name=file_name,
+            description=description,
+        )
