@@ -23,6 +23,12 @@ class TestTableFormat:
     def test_iceberg_from_string(self):
         assert TableFormat("ICEBERG") is TableFormat.ICEBERG
 
+    def test_bigquery_value(self):
+        assert TableFormat.BIGQUERY == "BIGQUERY"
+
+    def test_bigquery_from_string(self):
+        assert TableFormat("BIGQUERY") is TableFormat.BIGQUERY
+
 
 class TestIcebergConfig:
     """Verify IcebergConfig dataclass creation."""
@@ -110,3 +116,16 @@ class TestTableConfigFromApiResponse:
         }
         config = TableConfig.from_api_response("layer", "table", CloudProvider.GCP, api_data)
         assert config.iceberg_config is None
+
+    def test_gcp_bigquery_format(self):
+        """GCP tables report table_format='bigquery'; the SDK must parse it (was a hard crash before)."""
+        api_data = {
+            "table_format": "bigquery",  # backend stores lowercase; from_api_response upper-cases it
+            "layer_database_name": "my_dataset",
+        }
+        config = TableConfig.from_api_response("layer", "titanic_passengers", CloudProvider.GCP, api_data)
+        assert config.table_format == TableFormat.BIGQUERY
+        assert config.iceberg_config is None
+        assert config.delta_config is None  # delta_config is AWS-only
+        # GCP path is the BigQuery dataset.table reference
+        assert config.path == "my_dataset.titanic_passengers"

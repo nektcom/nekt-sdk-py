@@ -34,6 +34,7 @@ class TableFormat(StrEnum):
 
     DELTA = "DELTA"
     ICEBERG = "ICEBERG"
+    BIGQUERY = "BIGQUERY"  # GCP-managed tables (data lives in BigQuery, loaded via the BigQuery provider)
 
 
 class SaveMode(StrEnum):
