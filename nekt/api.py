@@ -44,6 +44,30 @@ class TransientAPIError(Exception):
 
 TRANSIENT_EXCEPTIONS = (ConnectionError, Timeout, TransientAPIError)
 
+# (connect, read) timeout applied to every HTTP call. requests has no built-in
+# default, so a call that omits `timeout` blocks forever on a half-open socket
+# (e.g. a stalled upload to a presigned URL) — with no exception ever raised,
+# the retry below never even fires. A generous read timeout turns such a stall
+# into a retryable `Timeout` instead of hanging the whole process indefinitely.
+DEFAULT_TIMEOUT: tuple[float, float] = (10.0, 300.0)
+
+
+class _TimeoutSession(requests.Session):
+    """`requests.Session` that injects a default timeout when a call omits one.
+
+    Centralizing the default here means no call site inside this client can
+    accidentally issue a timeout-less request and hang the process.
+    """
+
+    def __init__(self, timeout: tuple[float, float] = DEFAULT_TIMEOUT) -> None:
+        super().__init__()
+        self._default_timeout = timeout
+
+    def request(self, *args: Any, **kwargs: Any) -> requests.Response:  # noqa: D102
+        kwargs.setdefault("timeout", self._default_timeout)
+        return super().request(*args, **kwargs)
+
+
 _api_retry = retry(
     retry=retry_if_exception_type(TRANSIENT_EXCEPTIONS),
     wait=wait_exponential(multiplier=1, min=1, max=30),
@@ -79,8 +103,8 @@ class NektAPI:
         self._environment = environment
         self._token_type = token_type
 
-        # Connection-pooled session
-        self._session = requests.Session()
+        # Connection-pooled session with a default timeout on every request.
+        self._session = _TimeoutSession()
         self._session.headers.update(
             {
                 "Content-Type": "application/json",
@@ -818,7 +842,10 @@ class NektAPI:
         API calls; 4xx are raised immediately.
         """
         logger.debug("Uploading part %d (%d bytes)", part_number, len(chunk))
-        response = requests.put(presigned_url, data=chunk)
+        # This PUT goes straight to a presigned storage URL (not self._session),
+        # so the timeout must be passed explicitly — without it a stalled upload
+        # hangs forever and the @_api_retry above never triggers.
+        response = requests.put(presigned_url, data=chunk, timeout=DEFAULT_TIMEOUT)
         if response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
             raise TransientAPIError(f"Server error ({response.status_code}) uploading part {part_number}: {response.text}")
         response.raise_for_status()
