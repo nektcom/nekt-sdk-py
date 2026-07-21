@@ -35,6 +35,14 @@ logger = logging.getLogger(__name__)
 # AWS STS credentials expire after 1 hour, so we refresh before that
 CREDENTIAL_CACHE_DURATION_MINUTES = 45
 
+# (connect, read) timeouts for every HTTP call. Without an explicit timeout a
+# stalled socket blocks forever and the retry policy below never fires (Timeout
+# is only raised when a timeout is set) — a single stuck presigned-URL PUT once
+# froze a pipeline for days. Part uploads get a longer read timeout since the
+# read clock also covers awaiting S3's response after sending up to 100 MB.
+DEFAULT_TIMEOUT = (10, 120)
+UPLOAD_PART_TIMEOUT = (10, 600)
+
 
 class TransientAPIError(Exception):
     """Raised for 5xx server errors to trigger retry."""
@@ -229,7 +237,7 @@ class NektAPI:
         if use_s3a and provider == CloudProvider.AWS:
             params["use_s3a"] = "true"
 
-        response = self._session.get(url, params=params)
+        response = self._session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, f"table {layer_name}/{table_name}")
 
         api_data = response.json()
@@ -257,7 +265,7 @@ class NektAPI:
             TransientAPIError: On 5xx server errors (will be retried).
         """
         url = f"{self._api_url}/api/v1/i/layers/{layer_name}/tables/{table_name}/"
-        response = self._session.get(url, params=params)
+        response = self._session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, f"table {layer_name}/{table_name}")
 
         return response.json()
@@ -281,7 +289,7 @@ class NektAPI:
         else:
             url = f"{self._api_url}/api/v1/organization/notebooks-cloud-provider/"
 
-        response = self._session.get(url)
+        response = self._session.get(url, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, "cloud provider")
 
         data = response.json()
@@ -360,7 +368,7 @@ class NektAPI:
         else:
             url = f"{self._api_url}/api/v1/jupyter-credentials/"
 
-        response = self._session.get(url)
+        response = self._session.get(url, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, "cloud credentials")
 
         data = response.json()
@@ -402,7 +410,7 @@ class NektAPI:
             TransientAPIError: On 5xx server errors (will be retried).
         """
         url = f"{self._api_url}/api/v1/organization/secrets/{key}/"
-        response = self._session.get(url)
+        response = self._session.get(url, timeout=DEFAULT_TIMEOUT)
 
         if response.status_code == HTTPStatus.OK:
             data = response.json()
@@ -433,7 +441,7 @@ class NektAPI:
             raise ValueError("Volume name is required")
 
         url = f"{self._api_url}/api/v1/i/layers/{layer_name}/volumes/{volume_name}/get-file-paths/"
-        response = self._session.get(url)
+        response = self._session.get(url, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, f"volume {layer_name}/{volume_name}")
 
         return response.json()
@@ -473,7 +481,7 @@ class NektAPI:
         if description:
             payload["description"] = description
 
-        response = self._session.post(url, json=payload)
+        response = self._session.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, f"create volume {volume_name} in layer {layer_name}")
 
         return response.json()
@@ -521,7 +529,7 @@ class NektAPI:
         if description:
             payload["description"] = description
 
-        response = self._session.post(url, json=payload)
+        response = self._session.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, f"create volume file in {layer_name}/{volume_name}")
 
         return response.json()
@@ -558,7 +566,7 @@ class NektAPI:
             "file_upload_parts": parts,
         }
 
-        response = self._session.post(url, json=payload)
+        response = self._session.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, f"complete upload for volume {layer_name}/{volume_name}/{file_id}")
 
     @_api_retry
@@ -598,7 +606,7 @@ class NektAPI:
         if description:
             payload["description"] = description
 
-        response = self._session.post(url, json=payload)
+        response = self._session.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, f"create volume file in volume {volume_identifier}")
 
         return response.json()
@@ -623,7 +631,7 @@ class NektAPI:
             raise ValueError("Volume identifier is required")
 
         url = f"{self._api_url}/api/v1/i/volumes/{volume_identifier}/files/{file_id}/complete/"
-        response = self._session.post(url, json={"file_upload_parts": parts})
+        response = self._session.post(url, json={"file_upload_parts": parts}, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, f"complete upload for volume {volume_identifier}/{file_id}")
 
     def upload_file(
@@ -818,7 +826,7 @@ class NektAPI:
         API calls; 4xx are raised immediately.
         """
         logger.debug("Uploading part %d (%d bytes)", part_number, len(chunk))
-        response = requests.put(presigned_url, data=chunk)
+        response = requests.put(presigned_url, data=chunk, timeout=UPLOAD_PART_TIMEOUT)
         if response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
             raise TransientAPIError(f"Server error ({response.status_code}) uploading part {part_number}: {response.text}")
         response.raise_for_status()
