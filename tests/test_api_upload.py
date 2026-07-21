@@ -34,7 +34,7 @@ def test_upload_file_orchestrates(tmp_path, monkeypatch):
         lambda **kw: (created.update(kw) or {"id": "fid", "presigned_url_list": [{"part_number": 1, "presigned_url": "https://put"}]}),
     )
     monkeypatch.setattr(api, "complete_volume_file_upload", lambda **kw: completed.update(kw))
-    monkeypatch.setattr("nekt.api.requests.put", lambda url, data: _PutResp())
+    monkeypatch.setattr("nekt.api.requests.put", lambda url, data, timeout: _PutResp())
 
     result = api.upload_file("raw", "vol", str(f), file_name="custom.pdf")
 
@@ -70,7 +70,7 @@ def test_upload_file_accepts_url_string_list(tmp_path, monkeypatch):
 
     seen: list = []
 
-    def fake_put(url, data):
+    def fake_put(url, data, timeout):
         seen.append((url, len(data)))
         return _PutResp()
 
@@ -101,7 +101,7 @@ def test_upload_file_by_volume_id_uses_layerless_endpoints(tmp_path, monkeypatch
         lambda **kw: (created.update(kw) or {"id": "fid", "presigned_url_list": ["https://put/1"]}),
     )
     monkeypatch.setattr(api, "complete_volume_file_upload_by_volume_id", lambda **kw: completed.update(kw))
-    monkeypatch.setattr("nekt.api.requests.put", lambda url, data: _PutResp())
+    monkeypatch.setattr("nekt.api.requests.put", lambda url, data, timeout: _PutResp())
 
     result = api.upload_file_by_volume_id("vol-123", str(f), file_name="custom.pdf")
 
@@ -123,7 +123,7 @@ def test_create_volume_file_by_volume_id_url(monkeypatch):
         def json(self):
             return {"id": "fid", "presigned_url_list": []}
 
-    def fake_post(url, json):
+    def fake_post(url, json, timeout):
         captured["url"] = url
         return _Resp()
 
@@ -131,6 +131,44 @@ def test_create_volume_file_by_volume_id_url(monkeypatch):
     api.create_volume_file_by_volume_id("vol-123", "n.txt", 3, "text/plain")
     assert captured["url"].endswith("/api/v1/i/volumes/vol-123/files/")
     assert "/layers/" not in captured["url"]
+
+
+def test_all_http_calls_pass_a_timeout(tmp_path, monkeypatch):
+    """Every HTTP call must carry an explicit timeout.
+
+    Without one, a stalled socket blocks a single attempt forever and the
+    retry policy never fires (requests only raises Timeout when a timeout is
+    set) — a stuck presigned-URL PUT once froze a pipeline for days.
+    """
+    from nekt.api import DEFAULT_TIMEOUT, UPLOAD_PART_TIMEOUT
+
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"hello world")
+
+    api = _api()
+    timeouts: dict = {}
+
+    class _Resp:
+        ok = True
+
+        def json(self):
+            return {"id": "fid", "presigned_url_list": ["https://put/1"]}
+
+    def fake_session_post(url, json, timeout):
+        timeouts["session_post"] = timeout
+        return _Resp()
+
+    def fake_put(url, data, timeout):
+        timeouts["put"] = timeout
+        return _PutResp()
+
+    monkeypatch.setattr(api._session, "post", fake_session_post)
+    monkeypatch.setattr("nekt.api.requests.put", fake_put)
+
+    api.upload_file_by_volume_id("vol-123", str(f))
+
+    assert timeouts["session_post"] == DEFAULT_TIMEOUT
+    assert timeouts["put"] == UPLOAD_PART_TIMEOUT
 
 
 def test_upload_file_missing_file(tmp_path):
