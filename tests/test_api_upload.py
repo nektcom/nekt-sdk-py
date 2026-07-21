@@ -34,7 +34,7 @@ def test_upload_file_orchestrates(tmp_path, monkeypatch):
         lambda **kw: (created.update(kw) or {"id": "fid", "presigned_url_list": [{"part_number": 1, "presigned_url": "https://put"}]}),
     )
     monkeypatch.setattr(api, "complete_volume_file_upload", lambda **kw: completed.update(kw))
-    monkeypatch.setattr("nekt.api.requests.put", lambda url, data: _PutResp())
+    monkeypatch.setattr("nekt.api.requests.put", lambda url, data, timeout=None: _PutResp())
 
     result = api.upload_file("raw", "vol", str(f), file_name="custom.pdf")
 
@@ -70,7 +70,7 @@ def test_upload_file_accepts_url_string_list(tmp_path, monkeypatch):
 
     seen: list = []
 
-    def fake_put(url, data):
+    def fake_put(url, data, timeout=None):
         seen.append((url, len(data)))
         return _PutResp()
 
@@ -101,7 +101,7 @@ def test_upload_file_by_volume_id_uses_layerless_endpoints(tmp_path, monkeypatch
         lambda **kw: (created.update(kw) or {"id": "fid", "presigned_url_list": ["https://put/1"]}),
     )
     monkeypatch.setattr(api, "complete_volume_file_upload_by_volume_id", lambda **kw: completed.update(kw))
-    monkeypatch.setattr("nekt.api.requests.put", lambda url, data: _PutResp())
+    monkeypatch.setattr("nekt.api.requests.put", lambda url, data, timeout=None: _PutResp())
 
     result = api.upload_file_by_volume_id("vol-123", str(f), file_name="custom.pdf")
 
@@ -131,6 +131,57 @@ def test_create_volume_file_by_volume_id_url(monkeypatch):
     api.create_volume_file_by_volume_id("vol-123", "n.txt", 3, "text/plain")
     assert captured["url"].endswith("/api/v1/i/volumes/vol-123/files/")
     assert "/layers/" not in captured["url"]
+
+
+def test_upload_part_passes_timeout(tmp_path, monkeypatch):
+    """The presigned-URL PUT must carry a timeout, or a stalled upload hangs forever."""
+    f = tmp_path / "doc.bin"
+    f.write_bytes(b"x" * 4)
+
+    api = _api()
+    monkeypatch.setattr(
+        api,
+        "create_volume_file",
+        lambda **kw: {"id": "fid", "presigned_url_list": ["https://put/1"]},
+    )
+    monkeypatch.setattr(api, "complete_volume_file_upload", lambda **kw: None)
+
+    captured: dict = {}
+
+    def fake_put(url, data, timeout=None):
+        captured["timeout"] = timeout
+        return _PutResp()
+
+    monkeypatch.setattr("nekt.api.requests.put", fake_put)
+
+    api.upload_file("raw", "vol", str(f))
+
+    assert captured["timeout"] is not None, "requests.put was called without a timeout"
+
+
+def test_session_applies_default_timeout(monkeypatch):
+    """Every session request gets a default timeout even when the call omits one."""
+    from nekt.api import DEFAULT_TIMEOUT
+
+    api = _api()
+    captured: dict = {}
+
+    # Intercept the underlying Session.request the subclass delegates to.
+    def fake_super_request(self, *args, **kwargs):
+        captured["timeout"] = kwargs.get("timeout")
+
+        class _R:
+            ok = True
+
+            def json(self):
+                return {}
+
+        return _R()
+
+    monkeypatch.setattr("requests.Session.request", fake_super_request)
+    # Any session call with no explicit timeout should acquire the default.
+    api._session.get("https://api.test/ping")
+    assert captured["timeout"] == DEFAULT_TIMEOUT
 
 
 def test_upload_file_missing_file(tmp_path):
