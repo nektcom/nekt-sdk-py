@@ -13,7 +13,7 @@ dependencies = [
     "requests>=2.33.0",
     "tenacity>=8.2.0",
     # Data processing
-    "pyarrow>=17.0.0",
+    "pyarrow>=17.0.0,<25",  # <25: pyarrow 25 corrompe leitura de Delta escrito pelo nosso writer (NEKT-4121/NEKT-4866)
     "pandas>=2.2.0",
     # Cloud storage (gcsfs direct; s3fs comes via pyiceberg[s3fs])
     "gcsfs>=2023.1.0",
