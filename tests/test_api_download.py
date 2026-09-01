@@ -175,8 +175,8 @@ class _StreamResp:
             yield self.body[start : start + chunk_size]
 
 
-def _capture_storage_get(monkeypatch, response):
-    """Intercept the bare requests.get used for the presigned fetch."""
+def _capture_storage_get(monkeypatch, response, api=None):
+    """Intercept the credential-free session used for the presigned fetch."""
     captured = {}
 
     def fake_get(url, **kwargs):
@@ -184,7 +184,15 @@ def _capture_storage_get(monkeypatch, response):
         captured["kwargs"] = kwargs
         return response
 
-    monkeypatch.setattr("nekt.api.requests.get", fake_get)
+    import requests as _requests
+
+    session = _requests.Session()
+    session.get = fake_get
+    monkeypatch.setattr(
+        "nekt.api.NektAPI._storage_session",
+        property(lambda _self: session),
+    )
+    captured["session"] = session
     return captured
 
 
@@ -208,8 +216,7 @@ def test_download_file_does_not_send_nekt_credentials_to_storage(monkeypatch, tm
 
     api.download_file(str(tmp_path / "out.bin"), file_id="file-123")
 
-    # A bare requests.get, so no session headers ride along; and nothing
-    # auth-shaped is passed explicitly either.
+    # Nothing auth-shaped is passed explicitly...
     assert "headers" not in captured["kwargs"]
     assert "auth" not in captured["kwargs"]
     assert captured["kwargs"]["stream"] is True
@@ -241,3 +248,22 @@ def test_download_file_rejects_insufficient_identifiers(tmp_path):
     api = _api()
     with pytest.raises(ValueError, match="Not enough identifiers"):
         api.download_file(str(tmp_path / "out.bin"), volume="vol-123")
+
+
+def test_storage_session_is_pooled_and_credential_free():
+    """The download session must reuse connections yet carry no Nekt auth.
+
+    A bare `requests.get` per file paid a fresh TLS handshake each time, which
+    dominated the wall time of a bulk download. Reusing one session fixes that,
+    but only if it is a *separate* session from the API client's — otherwise the
+    data-access token would travel to a storage host.
+    """
+    api = _api()
+
+    first = api._storage_session
+    assert first is api._storage_session, "session must be reused across files"
+    assert first is not api._session, "must not be the API client's session"
+
+    auth_headers = {k for k in api._session.headers if "Token" in k or k.lower() == "authorization"}
+    assert auth_headers, "sanity: the API session does carry auth"
+    assert not any(k in first.headers for k in auth_headers)
