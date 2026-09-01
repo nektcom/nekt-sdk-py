@@ -25,4 +25,4 @@ def test_nekt_has_all_attribute():
     import nekt
     assert hasattr(nekt, "__all__")
     assert isinstance(nekt.__all__, list)
-    assert len(nekt.__all__) == 26
+    assert len(nekt.__all__) == 27

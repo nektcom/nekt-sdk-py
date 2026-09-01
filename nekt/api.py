@@ -7,6 +7,7 @@ import mimetypes
 import os
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
+from collections.abc import Iterator
 from typing import Any, Callable
 
 import requests
@@ -50,6 +51,9 @@ DOWNLOAD_TIMEOUT = (10, 600)
 # Chunk size for streaming a download to disk. Large enough that a big file does
 # not cost tens of thousands of writes, small enough to keep memory flat.
 DOWNLOAD_CHUNK_BYTES = 8 * 1024 * 1024
+
+# Files per request when listing a volume. The API caps page_size at 100.
+VOLUME_FILES_PAGE_SIZE = 100
 
 
 class TransientAPIError(Exception):
@@ -979,6 +983,67 @@ class NektAPI:
 
         url = f"{self._api_url}/api/v1/i/files/{file_id}/download/"
         return self._request_download_url(url, f"file {file_id}")
+
+    @_api_retry
+    def iter_volume_files(
+        self,
+        volume_identifier: str,
+        *,
+        updated_since: str | None = None,
+        page_size: int = VOLUME_FILES_PAGE_SIZE,
+    ) -> "Iterator[dict[str, Any]]":
+        """Yield every file in a volume, one page at a time.
+
+        A generator rather than a list: a volume can hold hundreds of thousands
+        of files, and a consumer streaming them (a Singer tap, say) should not
+        wait for — or hold — the whole listing.
+
+        Pagination follows the ``next`` URL the API returns instead of counting
+        offsets, so a page-size change on the server cannot desynchronize it.
+        Results arrive ordered by ``updated_at`` ascending, which is what makes
+        ``updated_since`` usable as an incremental bookmark.
+
+        Args:
+            volume_identifier: Volume id or slug.
+            updated_since: ISO-8601 timestamp; only files modified at or after
+                it are returned. Filtered server-side, so a run that finds
+                nothing new costs one request rather than a pass over the whole
+                volume.
+            page_size: Files per request (the API caps this at 100).
+
+        Yields:
+            One dict per file: ``id``, ``name``, ``description``, ``file_size``,
+            ``file_type``, ``created_at``, ``updated_at``.
+
+        Raises:
+            ValueError: If ``volume_identifier`` is empty.
+            VolumeNotFoundError: If the volume doesn't exist.
+            AuthenticationError: If access is denied.
+            TransientAPIError: On 5xx server errors (will be retried).
+        """
+        if not volume_identifier:
+            raise ValueError("Volume identifier is required")
+
+        url: str | None = f"{self._api_url}/api/v1/i/volumes/{volume_identifier}/files/"
+        params: dict[str, Any] | None = {"page_size": page_size}
+        if updated_since:
+            params["updated_at__gte"] = updated_since
+
+        context = f"volume {volume_identifier} files"
+        while url:
+            response = self._session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
+            self._check_response(response, context)
+            payload = response.json()
+
+            if isinstance(payload, list):
+                yield from payload
+                return
+
+            yield from payload.get("results", [])
+            # `next` carries its own query string; re-sending params would
+            # duplicate them.
+            url = payload.get("next")
+            params = None
 
     def get_download_url(
         self,

@@ -19,9 +19,12 @@ import importlib.util
 import os
 import sys
 import types as module_types
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-__version__ = "0.8.4"
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+__version__ = "0.8.5"
 
 _PUBLIC_ALL = [
     "Environment", "TokenType", "CloudProvider", "SaveMode",
@@ -32,7 +35,7 @@ _PUBLIC_ALL = [
     "load_volume", "create_volume", "save_file",
     "get_file_download_url", "get_file_download_url_by_volume_id",
     "get_file_download_url_by_file_id",
-    "get_download_url", "download_file",
+    "get_download_url", "download_file", "iter_volume_files",
     "get_spark_session", "logger", "get_logger",
 ]
 
@@ -366,6 +369,34 @@ class NektModule(module_types.ModuleType):
             A presigned download URL.
         """
         return self._get_engine().get_file_download_url_by_file_id(file_id=file_id)
+
+    def iter_volume_files(
+        self,
+        volume_identifier: str,
+        *,
+        updated_since: str | None = None,
+        page_size: int = 100,
+    ) -> "Iterator[dict[str, Any]]":
+        """Yield every file in a volume, one page at a time.
+
+        Results arrive ordered by ``updated_at`` ascending, so ``updated_since``
+        works as an incremental bookmark. Filtering happens server-side, so a
+        run that finds nothing new costs a single request.
+
+        Args:
+            volume_identifier: Volume id or slug.
+            updated_since: ISO-8601 timestamp; only files modified at or after it.
+            page_size: Files per request (the API caps this at 100).
+
+        Yields:
+            One dict per file: ``id``, ``name``, ``description``, ``file_size``,
+            ``file_type``, ``created_at``, ``updated_at``.
+        """
+        return self._get_engine().iter_volume_files(
+            volume_identifier=volume_identifier,
+            updated_since=updated_since,
+            page_size=page_size,
+        )
 
     def get_download_url(
         self,
