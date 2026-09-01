@@ -470,3 +470,5 @@ class SparkEngine(Engine):
             file_name=file_name,
             description=description,
         )
+
+    # get_file_download_url* are inherited from Engine -- engine-independent.

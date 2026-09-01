@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     import pandas as pd
     import pyspark.sql
 
+    from nekt.api import NektAPI
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,6 +22,10 @@ class Engine(ABC):
     Write methods are concrete stubs that return ``None`` and log a warning;
     the internal SDK overrides them with real implementations.
     """
+
+    # Set by every concrete engine in its ``__init__``; used by the
+    # engine-independent download helpers below.
+    _api: NektAPI
 
     # ------------------------------------------------------------------
     # Abstract -- subclasses MUST implement
@@ -112,6 +118,120 @@ class Engine(ABC):
         Returns:
             File metadata (id, name, size, type, etc.).
         """
+
+    # ------------------------------------------------------------------
+    # Concrete read methods -- engine-independent (delegate to the API)
+    # ------------------------------------------------------------------
+
+    def get_file_download_url(
+        self,
+        layer_name: str,
+        volume_name: str,
+        file_name: str,
+    ) -> str:
+        """Get a presigned download URL for a file (by layer + volume + file).
+
+        ``layer_name``, ``volume_name``, and ``file_name`` may each be a name,
+        slug, or id (the file segment accepts a name or id).
+
+        Args:
+            layer_name: Layer name, slug, or id.
+            volume_name: Volume name, slug, or id.
+            file_name: File name or id.
+
+        Returns:
+            A presigned download URL.
+        """
+        return self._api.get_file_download_url(
+            layer_name=layer_name,
+            volume_name=volume_name,
+            file_name=file_name,
+        )
+
+    def get_file_download_url_by_volume_id(
+        self,
+        volume_identifier: str,
+        file_name: str,
+    ) -> str:
+        """Get a presigned download URL by volume id/slug (layer inferred).
+
+        Args:
+            volume_identifier: Volume id or slug.
+            file_name: File name or id.
+
+        Returns:
+            A presigned download URL.
+        """
+        return self._api.get_file_download_url_by_volume_id(
+            volume_identifier=volume_identifier,
+            file_name=file_name,
+        )
+
+    def get_file_download_url_by_file_id(self, file_id: str) -> str:
+        """Get a presigned download URL by file id alone.
+
+        Args:
+            file_id: Id of the file.
+
+        Returns:
+            A presigned download URL.
+        """
+        return self._api.get_file_download_url_by_file_id(file_id=file_id)
+
+    def get_download_url(
+        self,
+        *,
+        file_id: str | None = None,
+        volume: str | None = None,
+        layer: str | None = None,
+        file_name: str | None = None,
+    ) -> str:
+        """Get a presigned download URL from whichever identifiers you have.
+
+        Args:
+            file_id: Id of the file (takes precedence when given).
+            volume: Volume id or slug (a name, when ``layer`` is also given).
+            layer: Layer name, slug, or id.
+            file_name: File name or id, resolved within the volume.
+
+        Returns:
+            A presigned download URL.
+        """
+        return self._api.get_download_url(
+            file_id=file_id,
+            volume=volume,
+            layer=layer,
+            file_name=file_name,
+        )
+
+    def download_file(
+        self,
+        destination: str,
+        *,
+        file_id: str | None = None,
+        volume: str | None = None,
+        layer: str | None = None,
+        file_name: str | None = None,
+    ) -> str:
+        """Download a volume file's contents to a local path.
+
+        Args:
+            destination: Local file path to write to.
+            file_id: Id of the file (takes precedence when given).
+            volume: Volume id or slug (a name, when ``layer`` is also given).
+            layer: Layer name, slug, or id.
+            file_name: File name or id, resolved within the volume.
+
+        Returns:
+            The path the file was written to.
+        """
+        return self._api.download_file(
+            destination,
+            file_id=file_id,
+            volume=volume,
+            layer=layer,
+            file_name=file_name,
+        )
 
     # ------------------------------------------------------------------
     # Concrete stubs -- write operations require nekt-sdk-internal

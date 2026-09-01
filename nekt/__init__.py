@@ -21,7 +21,7 @@ import sys
 import types as module_types
 from typing import Any
 
-__version__ = "0.7.0"
+__version__ = "0.8.4"
 
 _PUBLIC_ALL = [
     "Environment", "TokenType", "CloudProvider", "SaveMode",
@@ -30,6 +30,9 @@ _PUBLIC_ALL = [
     "data_access_token", "api_url", "engine",
     "load_table", "load_delta_table", "load_secret",
     "load_volume", "create_volume", "save_file",
+    "get_file_download_url", "get_file_download_url_by_volume_id",
+    "get_file_download_url_by_file_id",
+    "get_download_url", "download_file",
     "get_spark_session", "logger", "get_logger",
 ]
 
@@ -302,6 +305,133 @@ class NektModule(module_types.ModuleType):
             file_path=file_path,
             file_name=file_name,
             description=description,
+        )
+
+    def get_file_download_url(
+        self,
+        layer_name: str,
+        volume_name: str,
+        file_name: str,
+    ) -> str:
+        """Get a presigned download URL for a file in a volume.
+
+        ``layer_name``, ``volume_name``, and ``file_name`` may each be a name,
+        slug, or id (the file segment accepts a name or id). A value that
+        parses as a UUID is matched by id; otherwise by name/slug.
+
+        Args:
+            layer_name: Layer name, slug, or id.
+            volume_name: Volume name, slug, or id.
+            file_name: File name or id.
+
+        Returns:
+            A presigned download URL.
+        """
+        return self._get_engine().get_file_download_url(
+            layer_name=layer_name,
+            volume_name=volume_name,
+            file_name=file_name,
+        )
+
+    def get_file_download_url_by_volume_id(
+        self,
+        volume_identifier: str,
+        file_name: str,
+    ) -> str:
+        """Get a presigned download URL by volume id/slug (layer inferred).
+
+        Use this when you know only the volume (not its layer).
+        ``volume_identifier`` accepts an id or slug; ``file_name`` accepts a
+        name or id, resolved within the volume.
+
+        Args:
+            volume_identifier: Volume id or slug.
+            file_name: File name or id.
+
+        Returns:
+            A presigned download URL.
+        """
+        return self._get_engine().get_file_download_url_by_volume_id(
+            volume_identifier=volume_identifier,
+            file_name=file_name,
+        )
+
+    def get_file_download_url_by_file_id(self, file_id: str) -> str:
+        """Get a presigned download URL by file id alone.
+
+        Args:
+            file_id: Id of the file.
+
+        Returns:
+            A presigned download URL.
+        """
+        return self._get_engine().get_file_download_url_by_file_id(file_id=file_id)
+
+    def get_download_url(
+        self,
+        *,
+        file_id: str | None = None,
+        volume: str | None = None,
+        layer: str | None = None,
+        file_name: str | None = None,
+    ) -> str:
+        """Get a presigned download URL from whichever identifiers you have.
+
+        Pass ``file_id``, or ``volume`` + ``file_name``, or ``layer`` +
+        ``volume`` + ``file_name``. ``file_id`` takes precedence when given,
+        since it identifies the file on its own.
+
+        Args:
+            file_id: Id of the file.
+            volume: Volume id or slug (a name, when ``layer`` is also given).
+            layer: Layer name, slug, or id.
+            file_name: File name or id, resolved within the volume.
+
+        Returns:
+            A presigned download URL.
+        """
+        return self._get_engine().get_download_url(
+            file_id=file_id,
+            volume=volume,
+            layer=layer,
+            file_name=file_name,
+        )
+
+    def download_file(
+        self,
+        destination: str,
+        *,
+        file_id: str | None = None,
+        volume: str | None = None,
+        layer: str | None = None,
+        file_name: str | None = None,
+    ) -> str:
+        """Download a volume file's contents to a local path.
+
+        Accepts the same identifier combinations as :meth:`get_download_url`::
+
+            nekt.download_file("/tmp/a.pdf", file_id="533f3c69-...")
+            nekt.download_file("/tmp/a.pdf", volume="vol-123", file_name="a.pdf")
+            nekt.download_file("/tmp/a.pdf", layer="Raw", volume="documents",
+                               file_name="a.pdf")
+
+        Args:
+            destination: Local file path to write to. Its parent directory must
+                exist; a partial file is removed if the transfer fails.
+            file_id: Id of the file.
+            volume: Volume id or slug (a name, when ``layer`` is also given).
+            layer: Layer name, slug, or id.
+            file_name: File name or id, resolved within the volume.
+
+        Returns:
+            The path the file was written to.
+        """
+        return self._get_engine().download_file(
+            destination,
+            file_id=file_id,
+            volume=volume,
+            layer=layer,
+            file_name=file_name,
         )
 
     def load_delta_table(self, *, layer_name: str, table_name: str) -> Any:

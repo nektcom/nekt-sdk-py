@@ -22,6 +22,7 @@ from tenacity import (
 from nekt.exceptions import (
     APIError,
     AuthenticationError,
+    FileDownloadError,
     FileUploadError,
     SecretNotFoundError,
     TableNotFoundError,
@@ -42,6 +43,13 @@ CREDENTIAL_CACHE_DURATION_MINUTES = 45
 # read clock also covers awaiting S3's response after sending up to 100 MB.
 DEFAULT_TIMEOUT = (10, 120)
 UPLOAD_PART_TIMEOUT = (10, 600)
+# Downloads get the longer read timeout for the same reason part uploads do: the
+# read clock covers streaming an arbitrarily large object off storage.
+DOWNLOAD_TIMEOUT = (10, 600)
+
+# Chunk size for streaming a download to disk. Large enough that a big file does
+# not cost tens of thousands of writes, small enough to keep memory flat.
+DOWNLOAD_CHUNK_BYTES = 8 * 1024 * 1024
 
 
 class TransientAPIError(Exception):
@@ -831,3 +839,284 @@ class NektAPI:
             raise TransientAPIError(f"Server error ({response.status_code}) uploading part {part_number}: {response.text}")
         response.raise_for_status()
         return response.headers.get("ETag", "").strip('"')
+
+    # ------------------------------------------------------------------
+    # File download
+    # ------------------------------------------------------------------
+
+    def _request_download_url(self, url: str, context: str) -> str:
+        """GET a file-download endpoint and return its ``download_url``.
+
+        Shared by the ``get_file_download_url*`` variants. The endpoints all
+        respond with ``{"download_url": "..."}``.
+
+        Args:
+            url: Fully-built download endpoint URL.
+            context: Description of the request for error messages.
+
+        Returns:
+            The presigned download URL.
+
+        Raises:
+            FileDownloadError: If the response has no ``download_url``.
+            TransientAPIError: On 5xx server errors (will be retried).
+        """
+        response = self._session.get(url)
+        self._check_response(response, context)
+
+        download_url = response.json().get("download_url")
+        if not download_url:
+            raise FileDownloadError(f"No download URL returned for {context}")
+        return download_url
+
+    @_api_retry
+    def get_file_download_url(
+        self,
+        layer_name: str,
+        volume_name: str,
+        file_name: str,
+    ) -> str:
+        """Get a presigned download URL for a file (by layer + volume + file).
+
+        Targets the layer-scoped endpoint, which accepts the most flexible
+        identifiers: ``layer_name``, ``volume_name``, and ``file_name`` may
+        each be a name, slug, or id (the volume may be referenced by name here
+        because the layer scopes it, making ``(layer, name)`` unique). A value
+        that parses as a UUID is matched against the id; otherwise it is
+        matched by name/slug.
+
+        Args:
+            layer_name: Layer name, slug, or id.
+            volume_name: Volume name, slug, or id.
+            file_name: File name or id.
+
+        Returns:
+            A presigned download URL.
+
+        Raises:
+            ValueError: If any identifier is empty.
+            VolumeNotFoundError: If the volume or file doesn't exist.
+            AuthenticationError: If access is denied.
+            FileDownloadError: If the response has no download URL.
+            TransientAPIError: On 5xx server errors (will be retried).
+        """
+        if not layer_name:
+            raise ValueError("Layer name is required")
+        if not volume_name:
+            raise ValueError("Volume name is required")
+        if not file_name:
+            raise ValueError("File name is required")
+
+        url = (
+            f"{self._api_url}/api/v1/i/layers/{layer_name}"
+            f"/volumes/{volume_name}/files/{file_name}/download/"
+        )
+        return self._request_download_url(
+            url, f"volume file {layer_name}/{volume_name}/{file_name}"
+        )
+
+    @_api_retry
+    def get_file_download_url_by_volume_id(
+        self,
+        volume_identifier: str,
+        file_name: str,
+    ) -> str:
+        """Get a presigned download URL by volume (layer inferred).
+
+        Same as ``get_file_download_url`` but targets the layerless endpoint.
+        Without a layer in the path, ``volume_identifier`` accepts an id or
+        slug (not a name); ``file_name`` accepts a name or id, resolved within
+        the volume.
+
+        Args:
+            volume_identifier: Volume id or slug.
+            file_name: File name or id.
+
+        Returns:
+            A presigned download URL.
+
+        Raises:
+            ValueError: If ``volume_identifier`` or ``file_name`` is empty.
+            VolumeNotFoundError: If the volume or file doesn't exist.
+            AuthenticationError: If access is denied.
+            FileDownloadError: If the response has no download URL.
+            TransientAPIError: On 5xx server errors (will be retried).
+        """
+        if not volume_identifier:
+            raise ValueError("Volume identifier is required")
+        if not file_name:
+            raise ValueError("File name is required")
+
+        url = f"{self._api_url}/api/v1/i/volumes/{volume_identifier}/files/{file_name}/download/"
+        return self._request_download_url(
+            url, f"volume file {volume_identifier}/{file_name}"
+        )
+
+    @_api_retry
+    def get_file_download_url_by_file_id(
+        self,
+        file_id: str,
+    ) -> str:
+        """Get a presigned download URL by file id alone.
+
+        Targets the layerless, volumeless endpoint; only the file id is
+        accepted (there is no volume context for name resolution).
+
+        Args:
+            file_id: Id of the file.
+
+        Returns:
+            A presigned download URL.
+
+        Raises:
+            ValueError: If ``file_id`` is empty.
+            AuthenticationError: If access is denied.
+            FileDownloadError: If the response has no download URL.
+            TransientAPIError: On 5xx server errors (will be retried).
+        """
+        if not file_id:
+            raise ValueError("File id is required")
+
+        url = f"{self._api_url}/api/v1/i/files/{file_id}/download/"
+        return self._request_download_url(url, f"file {file_id}")
+
+    def get_download_url(
+        self,
+        *,
+        file_id: str | None = None,
+        volume: str | None = None,
+        layer: str | None = None,
+        file_name: str | None = None,
+    ) -> str:
+        """Get a presigned download URL from whichever identifiers you have.
+
+        A convenience front end for the three ``get_file_download_url*`` methods,
+        so a caller holding a record of file metadata can pass what it has
+        without picking an endpoint:
+
+        * ``file_id`` -> resolved by id alone.
+        * ``volume`` + ``file_name`` -> resolved within that volume.
+        * ``layer`` + ``volume`` + ``file_name`` -> resolved layer-scoped, which
+          additionally lets ``volume`` be a plain name.
+
+        ``file_id`` takes precedence when given: it identifies the file on its
+        own, so any ``volume``/``layer``/``file_name`` passed alongside it is
+        context and is ignored. This is deliberate -- records commonly carry all
+        of them, and a documented precedence beats rejecting the common case.
+
+        Args:
+            file_id: Id of the file.
+            volume: Volume id or slug (a name, when ``layer`` is also given).
+            layer: Layer name, slug, or id.
+            file_name: File name or id, resolved within the volume.
+
+        Returns:
+            A presigned download URL.
+
+        Raises:
+            ValueError: If the identifiers given do not form a usable
+                combination.
+        """
+        if file_id:
+            return self.get_file_download_url_by_file_id(file_id=file_id)
+        if file_name and volume and layer:
+            return self.get_file_download_url(
+                layer_name=layer,
+                volume_name=volume,
+                file_name=file_name,
+            )
+        if file_name and volume:
+            return self.get_file_download_url_by_volume_id(
+                volume_identifier=volume,
+                file_name=file_name,
+            )
+        raise ValueError(
+            "Not enough identifiers to locate the file. Pass file_id, or "
+            "volume + file_name, or layer + volume + file_name.",
+        )
+
+    @_api_retry
+    def download_file(
+        self,
+        destination: str,
+        *,
+        file_id: str | None = None,
+        volume: str | None = None,
+        layer: str | None = None,
+        file_name: str | None = None,
+        chunk_size: int = DOWNLOAD_CHUNK_BYTES,
+    ) -> str:
+        """Download a volume file's contents to a local path.
+
+        Accepts the same identifier combinations as :meth:`get_download_url`.
+        The URL is minted immediately before it is used, and re-minted on each
+        retry, so a slow or interrupted transfer never fails on an expired one.
+
+        The presigned URL points at object storage, not at the Nekt API, so the
+        fetch deliberately does NOT reuse this client's session: sending the
+        data-access token to a storage host would hand a third party a live Nekt
+        credential.
+
+        Args:
+            destination: Local file path to write to. Its parent directory must
+                exist. A partially written file is removed if the transfer
+                fails, so the path never holds a truncated file.
+            file_id: Id of the file.
+            volume: Volume id or slug (a name, when ``layer`` is also given).
+            layer: Layer name, slug, or id.
+            file_name: File name or id, resolved within the volume.
+            chunk_size: Bytes per write while streaming.
+
+        Returns:
+            The path the file was written to.
+
+        Raises:
+            ValueError: If the identifiers given do not form a usable
+                combination.
+            FileDownloadError: If the file could not be fetched.
+        """
+        url = self.get_download_url(
+            file_id=file_id,
+            volume=volume,
+            layer=layer,
+            file_name=file_name,
+        )
+        described = file_id or f"{volume}/{file_name}"
+
+        try:
+            # A bare request, not self._session -- see the note above.
+            with requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT) as response:
+                if not response.ok:
+                    raise FileDownloadError(
+                        f"Failed to download {described}: storage returned "
+                        f"{response.status_code}",
+                    )
+                with open(destination, "wb") as file_handle:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            file_handle.write(chunk)
+        except TRANSIENT_EXCEPTIONS:
+            # Let tenacity retry these, but never leave a half file behind for
+            # the next attempt (or for a caller that gives up).
+            self._remove_partial_download(destination)
+            raise
+        except FileDownloadError:
+            self._remove_partial_download(destination)
+            raise
+        except OSError as exc:
+            self._remove_partial_download(destination)
+            raise FileDownloadError(
+                f"Failed to write {described} to {destination}: {exc}",
+            ) from exc
+
+        return destination
+
+    @staticmethod
+    def _remove_partial_download(path: str) -> None:
+        """Delete a partially written download, tolerating one never created."""
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning("Could not remove partial download %s: %s", path, exc)
