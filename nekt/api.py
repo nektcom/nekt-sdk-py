@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from collections.abc import Iterator
@@ -101,9 +102,9 @@ class NektAPI:
 
         # Connection-pooled session
         self._session = requests.Session()
-        # Built lazily by `_storage_session`; kept apart from `_session` on
-        # purpose so no auth header can ever reach a storage host.
-        self._storage_session_instance: requests.Session | None = None
+        # Built lazily per thread by `_storage_session`; kept apart from
+        # `_session` so no auth header can ever reach a storage host.
+        self._storage_sessions = threading.local()
         self._session.headers.update(
             {
                 "Content-Type": "application/json",
@@ -1197,10 +1198,17 @@ class NektAPI:
 
         A dedicated session satisfies both: separate from ``_session``, so no
         header can leak into it, and reused, so the handshake is paid once.
+
+        It is thread-local because ``requests.Session`` is not guaranteed
+        thread-safe, and a caller downloading files in parallel would otherwise
+        share one across threads. Per-thread sessions keep the pooling benefit
+        within each worker while removing that hazard.
         """
-        if self._storage_session_instance is None:
-            self._storage_session_instance = requests.Session()
-        return self._storage_session_instance
+        session = getattr(self._storage_sessions, "session", None)
+        if session is None:
+            session = requests.Session()
+            self._storage_sessions.session = session
+        return session
 
     @staticmethod
     def _remove_partial_download(path: str) -> None:

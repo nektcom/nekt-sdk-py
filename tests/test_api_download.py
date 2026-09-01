@@ -264,6 +264,17 @@ def test_storage_session_is_pooled_and_credential_free():
     assert first is api._storage_session, "session must be reused across files"
     assert first is not api._session, "must not be the API client's session"
 
+    # Per thread, because requests.Session is not guaranteed thread-safe and
+    # callers download in parallel.
+    import threading
+
+    other: list = []
+    thread = threading.Thread(target=lambda: other.append(api._storage_session))
+    thread.start()
+    thread.join()
+    assert other[0] is not first, "each thread needs its own session"
+    assert other[0] is not api._session
+
     auth_headers = {k for k in api._session.headers if "Token" in k or k.lower() == "authorization"}
     assert auth_headers, "sanity: the API session does carry auth"
     assert not any(k in first.headers for k in auth_headers)
