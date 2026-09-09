@@ -264,7 +264,16 @@ class SparkEngine(Engine):
             table_reference = f"{table_details['layer_database_name']}.{table_name}"
             logger.info("[%s/%s] Loading from BigQuery: %s", layer_name, table_name, table_reference)
             provider = self._get_data_provider()
-            return provider.load(table_reference)
+            # An external table is a BigQuery VIEW over a table in the customer's own project, and
+            # the connector refuses a view unless views are enabled — at which point it
+            # materializes the view first and needs somewhere to write it. The backend sends both,
+            # because neither is discoverable from here (NEKT-5114). Absent for a managed table,
+            # so `.get` and not `[...]`: an older backend must keep working.
+            return provider.load(
+                table_reference,
+                views_enabled=table_details.get("views_enabled", False),
+                materialization_dataset=table_details.get("materialization_dataset", ""),
+            )
         else:
             raise EngineError(f"Unsupported provider: {self._cloud_provider}")
 
