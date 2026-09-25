@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-__version__ = "0.8.9"
+__version__ = "0.8.10"
 
 _PUBLIC_ALL = [
     "Environment", "TokenType", "CloudProvider", "SaveMode",
