@@ -47,7 +47,8 @@ class DeltaProvider(DataProvider):
 
         Args:
             path: S3 path to the Delta table (e.g. ``s3://bucket/path/to/table``).
-            **options: Additional options passed to ``DeltaTable.to_pyarrow_table``.
+            **options: The options ``DeltaTable.to_pyarrow_table`` accepts:
+                ``partitions``, ``columns``, ``filesystem``, ``filters``.
 
         Returns:
             PyArrow Table containing the data.
@@ -67,6 +68,35 @@ class DeltaProvider(DataProvider):
         path = self._normalize_path(path)
         try:
             dt = DeltaTable(path, storage_options=self._storage_options)
-            return dt.to_pyarrow_table(**options)
+            return _read_delta_table(dt, **options)
         except Exception as e:
             raise DeltaProviderError(f"Failed to load Delta table from {path}: {e}") from e
+
+
+def _read_delta_table(
+    dt: Any,
+    partitions: Any = None,
+    columns: list[str] | None = None,
+    filesystem: Any = None,
+    filters: Any = None,
+) -> Any:
+    """``DeltaTable.to_pyarrow_table``, but scanning on the calling thread.
+
+    ``to_pyarrow_table`` scans through a pyarrow ``PyFileSystem`` that calls back
+    into delta-rs's Rust object store from pyarrow's worker threads. With
+    deltalake 1.x, a process that did this dies at exit: on Linux it aborts with
+    "terminate called without an active exception" (exit 134, losing any
+    unflushed output), and on macOS it hangs. Reproduced on S3 and on the local
+    filesystem, with pyarrow 21-23.
+
+    Scanning with ``use_threads=False`` avoids it and costs nothing measurable:
+    the storage handler already serializes reads, so a 57-file table on S3 with
+    40ms latency took ~8s either way.
+    """
+    import pyarrow.dataset as pa_ds
+    from pyarrow.parquet import filters_to_expression
+
+    if filters is not None and not isinstance(filters, pa_ds.Expression):
+        filters = filters_to_expression(filters)
+    dataset = dt.to_pyarrow_dataset(partitions=partitions, filesystem=filesystem)
+    return dataset.to_table(columns=columns, filter=filters, use_threads=False)

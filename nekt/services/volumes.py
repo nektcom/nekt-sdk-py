@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import requests
 
+from nekt.api import TransientAPIError
 from nekt.exceptions import FileUploadError
 
 if TYPE_CHECKING:
@@ -153,15 +154,13 @@ class VolumeService:
                         "Uploading part %d (%d bytes)", part_number, len(chunk),
                     )
 
-                    # Use requests.put directly -- presigned URLs are
-                    # pre-authenticated cloud storage URLs, not Nekt API endpoints
-                    upload_response = requests.put(presigned_url, data=chunk)
-                    upload_response.raise_for_status()
-
-                    etag = upload_response.headers.get("ETag", "").strip('"')
+                    # Presigned URLs are pre-authenticated storage URLs, not Nekt
+                    # API endpoints: `_upload_part` sends them through the
+                    # credential-free storage session, with a timeout and deadline.
+                    etag = self._api._upload_part(presigned_url, chunk, part_number)
                     parts.append({"etag": etag, "part_number": part_number})
 
-        except requests.RequestException as e:
+        except (requests.RequestException, TransientAPIError) as e:
             raise FileUploadError(f"Failed to upload file part: {e}") from e
         except OSError as e:
             raise FileUploadError(f"Failed to read file: {e}") from e
