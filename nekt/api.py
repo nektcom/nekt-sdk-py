@@ -18,6 +18,7 @@ from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
+    stop_after_delay,
     wait_exponential,
 )
 
@@ -30,6 +31,13 @@ from nekt.exceptions import (
     TableNotFoundError,
     VolumeNotFoundError,
 )
+from nekt.http import (  # noqa: F401 - timeouts re-exported; callers import them from here
+    DEFAULT_TIMEOUT,
+    DOWNLOAD_TIMEOUT,
+    UPLOAD_PART_TIMEOUT,
+    DeadlineExceeded,
+    DeadlineSession,
+)
 from nekt.types import CloudCredentials, CloudProvider, Environment, TableConfig, TokenType
 
 logger = logging.getLogger(__name__)
@@ -37,17 +45,6 @@ logger = logging.getLogger(__name__)
 # Default credential cache duration (45 minutes)
 # AWS STS credentials expire after 1 hour, so we refresh before that
 CREDENTIAL_CACHE_DURATION_MINUTES = 45
-
-# (connect, read) timeouts for every HTTP call. Without an explicit timeout a
-# stalled socket blocks forever and the retry policy below never fires (Timeout
-# is only raised when a timeout is set) — a single stuck presigned-URL PUT once
-# froze a pipeline for days. Part uploads get a longer read timeout since the
-# read clock also covers awaiting S3's response after sending up to 100 MB.
-DEFAULT_TIMEOUT = (10, 120)
-UPLOAD_PART_TIMEOUT = (10, 600)
-# Downloads get the longer read timeout for the same reason part uploads do: the
-# read clock covers streaming an arbitrarily large object off storage.
-DOWNLOAD_TIMEOUT = (10, 600)
 
 # Chunk size for streaming a download to disk. Large enough that a big file does
 # not cost tens of thousands of writes, small enough to keep memory flat.
@@ -65,10 +62,15 @@ class TransientAPIError(Exception):
 
 TRANSIENT_EXCEPTIONS = (ConnectionError, Timeout, TransientAPIError)
 
+# Total budget across all attempts of one call. Every attempt is already capped
+# by its deadline (see nekt.http); this keeps five capped attempts from adding
+# up to much more than 15 minutes when the API host is unreachable.
+RETRY_BUDGET_SECONDS = 15 * 60
+
 _api_retry = retry(
     retry=retry_if_exception_type(TRANSIENT_EXCEPTIONS),
     wait=wait_exponential(multiplier=1, min=1, max=30),
-    stop=stop_after_attempt(5),
+    stop=stop_after_attempt(5) | stop_after_delay(RETRY_BUDGET_SECONDS),
     before_sleep=before_sleep_log(logger, logging.DEBUG),
     reraise=True,
 )
@@ -100,8 +102,10 @@ class NektAPI:
         self._environment = environment
         self._token_type = token_type
 
-        # Connection-pooled session
-        self._session = requests.Session()
+        # Connection-pooled session. Reusing its keep-alive connections also
+        # skips DNS entirely after the first call to a host; DeadlineSession caps
+        # the calls that do resolve (see nekt.http).
+        self._session = DeadlineSession()
         # Built lazily per thread by `_storage_session`; kept apart from
         # `_session` so no auth header can ever reach a storage host.
         self._storage_sessions = threading.local()
@@ -828,7 +832,7 @@ class NektAPI:
 
                     etag = self._upload_part(presigned_url, chunk, part_number)
                     parts.append({"etag": etag, "part_number": part_number})
-        except requests.RequestException as e:
+        except (requests.RequestException, TransientAPIError) as e:
             raise FileUploadError(f"Failed to upload file part: {e}") from e
         except OSError as e:
             raise FileUploadError(f"Failed to read file: {e}") from e
@@ -842,7 +846,9 @@ class NektAPI:
         API calls; 4xx are raised immediately.
         """
         logger.debug("Uploading part %d (%d bytes)", part_number, len(chunk))
-        response = requests.put(presigned_url, data=chunk, timeout=UPLOAD_PART_TIMEOUT)
+        # `_storage_session`, never `self._session`: the presigned URL is a
+        # storage host and must not receive the Nekt auth header.
+        response = self._storage_session.put(presigned_url, data=chunk, timeout=UPLOAD_PART_TIMEOUT)
         if response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
             raise TransientAPIError(f"Server error ({response.status_code}) uploading part {part_number}: {response.text}")
         response.raise_for_status()
@@ -869,7 +875,7 @@ class NektAPI:
             FileDownloadError: If the response has no ``download_url``.
             TransientAPIError: On 5xx server errors (will be retried).
         """
-        response = self._session.get(url)
+        response = self._session.get(url, timeout=DEFAULT_TIMEOUT)
         self._check_response(response, context)
 
         download_url = response.json().get("download_url")
@@ -1206,7 +1212,7 @@ class NektAPI:
         """
         session = getattr(self._storage_sessions, "session", None)
         if session is None:
-            session = requests.Session()
+            session = DeadlineSession()
             self._storage_sessions.session = session
         return session
 

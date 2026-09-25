@@ -34,7 +34,7 @@ def test_upload_file_orchestrates(tmp_path, monkeypatch):
         lambda **kw: (created.update(kw) or {"id": "fid", "presigned_url_list": [{"part_number": 1, "presigned_url": "https://put"}]}),
     )
     monkeypatch.setattr(api, "complete_volume_file_upload", lambda **kw: completed.update(kw))
-    monkeypatch.setattr("nekt.api.requests.put", lambda url, data, timeout: _PutResp())
+    monkeypatch.setattr(api._storage_session, "put", lambda url, data, timeout: _PutResp())
 
     result = api.upload_file("raw", "vol", str(f), file_name="custom.pdf")
 
@@ -74,7 +74,7 @@ def test_upload_file_accepts_url_string_list(tmp_path, monkeypatch):
         seen.append((url, len(data)))
         return _PutResp()
 
-    monkeypatch.setattr("nekt.api.requests.put", fake_put)
+    monkeypatch.setattr(api._storage_session, "put", fake_put)
 
     result = api.upload_file("raw", "vol", str(f))
 
@@ -101,7 +101,7 @@ def test_upload_file_by_volume_id_uses_layerless_endpoints(tmp_path, monkeypatch
         lambda **kw: (created.update(kw) or {"id": "fid", "presigned_url_list": ["https://put/1"]}),
     )
     monkeypatch.setattr(api, "complete_volume_file_upload_by_volume_id", lambda **kw: completed.update(kw))
-    monkeypatch.setattr("nekt.api.requests.put", lambda url, data, timeout: _PutResp())
+    monkeypatch.setattr(api._storage_session, "put", lambda url, data, timeout: _PutResp())
 
     result = api.upload_file_by_volume_id("vol-123", str(f), file_name="custom.pdf")
 
@@ -163,7 +163,7 @@ def test_all_http_calls_pass_a_timeout(tmp_path, monkeypatch):
         return _PutResp()
 
     monkeypatch.setattr(api._session, "post", fake_session_post)
-    monkeypatch.setattr("nekt.api.requests.put", fake_put)
+    monkeypatch.setattr(api._storage_session, "put", fake_put)
 
     api.upload_file_by_volume_id("vol-123", str(f))
 
@@ -184,3 +184,20 @@ def test_upload_file_no_presigned_urls(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "create_volume_file", lambda **kw: {"id": "fid", "presigned_url_list": []})
     with pytest.raises(FileUploadError, match="No presigned URLs"):
         api.upload_file("raw", "vol", str(f))
+
+
+def test_part_upload_uses_the_credential_free_storage_session(tmp_path, monkeypatch):
+    """Presigned PUTs must never carry the Nekt auth header (NEKT-5260)."""
+    f = tmp_path / "doc.bin"
+    f.write_bytes(b"x" * 4)
+
+    api = _api()
+    monkeypatch.setattr(api, "create_volume_file", lambda **kw: {"id": "fid", "presigned_url_list": ["https://put/1"]})
+    monkeypatch.setattr(api, "complete_volume_file_upload", lambda **kw: None)
+    monkeypatch.setattr(api._session, "put", lambda *a, **kw: pytest.fail("part upload went through the authenticated session"))
+    monkeypatch.setattr(api._storage_session, "put", lambda url, data, timeout: _PutResp())
+
+    api.upload_file("raw", "vol", str(f))
+
+    assert "X-Jupyter-Token" not in api._storage_session.headers
+    assert "X-Pipeline-Run-Token" not in api._storage_session.headers
