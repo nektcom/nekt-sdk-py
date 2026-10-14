@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nekt-sdk"
-version = "0.8.13"
+version = "0.8.14"
 description = "Nekt SDK for data lake operations"
 readme = "README.md"
 requires-python = ">=3.11"
