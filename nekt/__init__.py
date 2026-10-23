@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-__version__ = "0.8.14"
+__version__ = "0.8.15"
 
 _PUBLIC_ALL = [
     "Environment", "TokenType", "CloudProvider", "SaveMode",
@@ -86,6 +86,19 @@ class NektModule(module_types.ModuleType):
                 f"Cannot change '{attr_name}' after the first API call."
             )
 
+    def _pinned_engine(self) -> tuple[str, str] | None:
+        """Return (engine, source) when the engine can no longer change, else None.
+
+        It is pinned once the first API call initialized it, or whenever a valid
+        NEKT_ENGINE env var is set, since that always wins at initialization.
+        """
+        if self._nekt_locked and self._nekt_engine is not None:
+            return self._nekt_engine, "in use since the first SDK call"
+        env_engine = os.environ.get("NEKT_ENGINE")
+        if env_engine in ("spark", "python"):
+            return env_engine, "set by the NEKT_ENGINE environment variable"
+        return None
+
     def _resolve_config(self) -> None:
         """Resolve config, with env vars taking precedence over code-set values.
 
@@ -118,6 +131,9 @@ class NektModule(module_types.ModuleType):
             from nekt.exceptions import EngineNotSetError
 
             raise EngineNotSetError()
+
+        source = "NEKT_ENGINE environment variable" if env_engine is not None else "nekt.engine"
+        self.logger.info(f"Using the '{self._nekt_engine}' engine (from {source}).")
 
         # Token must be available
         if self._nekt_data_access_token is None:
@@ -644,9 +660,21 @@ class NektModule(module_types.ModuleType):
             self._ensure_not_locked(name)
             object.__setattr__(self, "_nekt_api_url", value)
         elif name == "engine":
-            self._ensure_not_locked(name)
             if value not in ("spark", "python"):
                 raise ValueError("engine must be 'spark' or 'python'")
+            pinned = self._pinned_engine()
+            if pinned is not None:
+                engine, source = pinned
+                if value == engine:
+                    # Production sets NEKT_ENGINE, so code that also sets it locally
+                    # must keep working when it asks for the same engine.
+                    self.logger.info(f"Engine is already '{engine}' ({source}); nekt.engine = '{value}' has no effect.")
+                    return
+                from nekt.exceptions import ConfigurationLockedError
+
+                raise ConfigurationLockedError(
+                    f"Cannot set engine to '{value}': the engine is already '{engine}' ({source})."
+                )
             if value == "spark":
                 self._check_dependency("pyspark", "spark")
             object.__setattr__(self, "_nekt_engine", value)
