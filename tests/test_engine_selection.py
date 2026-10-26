@@ -62,3 +62,59 @@ class TestMissingDependency:
         with patch("importlib.util.find_spec", return_value=None):
             with pytest.raises(MissingDependencyError, match="pyspark"):
                 m.engine = "spark"
+
+
+class TestEngineReassignment:
+    """Setting the engine to the one already in use is a no-op; a different one raises."""
+
+    def test_same_engine_as_env_var_is_noop(self, monkeypatch):
+        monkeypatch.setenv("NEKT_ENGINE", "python")
+        m = _fresh_module()
+        m.engine = "python"
+        assert m.engine is None  # untouched: NEKT_ENGINE decides at initialization
+
+    def test_different_engine_from_env_var_raises(self, monkeypatch):
+        from nekt.exceptions import ConfigurationLockedError
+
+        monkeypatch.setenv("NEKT_ENGINE", "python")
+        m = _fresh_module()
+        with pytest.raises(ConfigurationLockedError, match="NEKT_ENGINE"):
+            m.engine = "spark"
+
+    def test_same_engine_after_initialization_is_noop(self, monkeypatch):
+        monkeypatch.delenv("NEKT_ENGINE", raising=False)
+        m = _fresh_module()
+        m.engine = "python"
+        object.__setattr__(m, "_nekt_locked", True)
+        m.engine = "python"
+        assert m.engine == "python"
+
+    def test_different_engine_after_initialization_raises(self, monkeypatch):
+        from nekt.exceptions import ConfigurationLockedError
+
+        monkeypatch.delenv("NEKT_ENGINE", raising=False)
+        m = _fresh_module()
+        m.engine = "python"
+        object.__setattr__(m, "_nekt_locked", True)
+        with pytest.raises(ConfigurationLockedError, match="already 'python'"):
+            m.engine = "spark"
+
+    def test_engine_can_change_before_initialization(self, monkeypatch):
+        monkeypatch.delenv("NEKT_ENGINE", raising=False)
+        m = _fresh_module()
+        m.engine = "python"
+        with patch("importlib.util.find_spec", return_value=object()):
+            m.engine = "spark"
+        assert m.engine == "spark"
+
+    def test_initialization_logs_engine_and_source(self, monkeypatch, caplog):
+        monkeypatch.setenv("NEKT_ENGINE", "python")
+        monkeypatch.setenv("NEKT_DATA_ACCESS_TOKEN", "t")
+        m = _fresh_module()
+        m.logger.propagate = True
+        try:
+            with caplog.at_level("INFO", logger="nekt.user"):
+                m._resolve_config()
+        finally:
+            m.logger.propagate = False
+        assert "Using the 'python' engine (from NEKT_ENGINE environment variable)" in caplog.text
