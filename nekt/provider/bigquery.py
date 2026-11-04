@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import pyarrow as pa
 
 from nekt.exceptions import BigQueryProviderError
+from nekt.http import DEFAULT_TIMEOUT, call_with_deadline, deadline_for
 from nekt.provider.base import DataProvider
 from nekt.types import CloudCredentials
 
@@ -39,6 +41,100 @@ BQ_TO_ARROW_TYPE_MAP: dict[str, pa.DataType] = {
     "GEOGRAPHY": pa.string(),
     "JSON": pa.string(),
 }
+
+
+# (connect, read) timeout for every BigQuery REST call. google-cloud-bigquery's
+# own default is ``None``: ``Client._call_api`` hands it unchanged down to
+# ``requests``, so a socket severed under the call blocks forever and the
+# library's retry never fires -- it only retries a *raised* Timeout. On
+# 2026-11-03 a Cloud Run maintenance migration did exactly that to 11 runs,
+# which sat "running" for 10h+ inside a single ``query().to_arrow()`` or
+# ``get_table()`` (NEKT-6284).
+BIGQUERY_TIMEOUT = DEFAULT_TIMEOUT
+
+_session_class: type | None = None
+
+
+def _timeout_session_class() -> type:
+    """Return (building it once) the ``AuthorizedSession`` subclass that enforces timeouts.
+
+    Built lazily because google-auth, like google-cloud-bigquery, is an optional
+    dependency of the SDK.
+    """
+    global _session_class
+    if _session_class is not None:
+        return _session_class
+
+    from google.auth.transport.requests import AuthorizedSession
+
+    class TimeoutAuthorizedSession(AuthorizedSession):
+        """``AuthorizedSession`` in which no request can block indefinitely.
+
+        google-cloud-bigquery sends ``timeout=None`` for every call made without
+        an explicit timeout. This substitutes the session default and runs the
+        request under the wall-clock deadline from :mod:`nekt.http`, which also
+        covers a resolver stall. A timeout the caller does set is honoured as
+        is. ``DeadlineExceeded`` and the socket's own ``Timeout`` are both in
+        the library's retryable set, so the call is retried on a fresh
+        connection instead of hanging the run.
+        """
+
+        def __init__(self, credentials: Any, timeout: Any = BIGQUERY_TIMEOUT, **kwargs: Any) -> None:
+            super().__init__(credentials, **kwargs)
+            self._default_timeout = timeout
+
+        def request(  # type: ignore[override]
+            self, method: Any, url: Any, *args: Any, timeout: Any = None, **kwargs: Any
+        ) -> Any:
+            if timeout is None:
+                timeout = self._default_timeout
+            method_name = method.decode() if isinstance(method, bytes) else method
+            url_text = url.decode() if isinstance(url, bytes) else url
+            return call_with_deadline(
+                super().request,
+                method,
+                url,
+                *args,
+                deadline=deadline_for(timeout),
+                description=f"{method_name.upper()} {urlsplit(url_text).netloc}",
+                timeout=timeout,
+                **kwargs,
+            )
+
+    _session_class = TimeoutAuthorizedSession
+    return _session_class
+
+
+def build_bigquery_client(
+    project: str | None = None,
+    credentials: Any = None,
+    timeout: Any = BIGQUERY_TIMEOUT,
+) -> bigquery.Client:
+    """Return a ``bigquery.Client`` whose every HTTP call carries a timeout.
+
+    Args:
+        project: Default project for jobs and unqualified table references.
+            Falls back to the credentials' project when they carry one.
+        credentials: Any ``google.auth`` credentials object. ``None`` means
+            Application Default Credentials, as ``bigquery.Client()`` would use.
+        timeout: ``requests`` timeout applied to calls made without one.
+
+    Returns:
+        A client identical to ``bigquery.Client(project, credentials)`` except
+        for its HTTP session (see ``TimeoutAuthorizedSession``).
+    """
+    import google.auth
+    from google.auth.credentials import with_scopes_if_required
+    from google.cloud import bigquery as bq
+
+    if credentials is None:
+        credentials, default_project = google.auth.default(scopes=bq.Client.SCOPE)
+        project = project or default_project
+    # bigquery.Client scopes the credentials it is given; the session we hand it
+    # must refresh with the same scopes, so scope them up front.
+    credentials = with_scopes_if_required(credentials, bq.Client.SCOPE)
+    session = _timeout_session_class()(credentials, timeout=timeout)
+    return bq.Client(project=project, credentials=credentials, _http=session)
 
 
 class BigQueryProvider(DataProvider):
@@ -106,11 +202,10 @@ class BigQueryProvider(DataProvider):
             BigQueryProviderError: If loading fails or the library is missing.
         """
         try:
-            from google.cloud import bigquery as bq
+            import google.cloud.bigquery  # noqa: F401 - only checks the optional dependency is installed
         except ImportError as e:
             raise BigQueryProviderError(
-                "google-cloud-bigquery is required for loading BigQuery tables on GCP. "
-                "Install it with: pip install google-cloud-bigquery"
+                "google-cloud-bigquery is required for loading BigQuery tables on GCP. Install it with: pip install google-cloud-bigquery"
             ) from e
 
         try:
@@ -125,7 +220,7 @@ class BigQueryProvider(DataProvider):
                 if self._credentials.gcp_project_id:
                     project = self._credentials.gcp_project_id
 
-            client = bq.Client(project=project, credentials=gcp_creds)
+            client = build_bigquery_client(project, gcp_creds)
 
             # Build query
             columns = options.get("columns")
